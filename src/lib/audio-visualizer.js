@@ -1,3 +1,8 @@
+// Context state changes can race with teardown; failures here are harmless.
+function ignoreError() {
+	/* noop */
+}
+
 class Analyser {
 	constructor(analyserOptions) {
 		this.audio = analyserOptions.audio;
@@ -15,7 +20,8 @@ class Analyser {
 		this.analyser = this.audioContext.createAnalyser();
 		this.analyser.fftSize = 2048;
 		this.frequencyNum = 1024;
-		this.hz = 22028;
+		// Nyquist frequency: half of the real sample rate (44.1 kHz or 48 kHz depending on device).
+		this.hz = this.audioContext.sampleRate / 2;
 		this.analyser.smoothingTimeConstant = analyserOptions.smoothTime;
 
 		this.filterLP = this.audioContext.createBiquadFilter();
@@ -168,9 +174,29 @@ class Sound {
 	constructor(_visual, audio) {
 		this.visual = _visual;
 		this.audio = audio;
-		this.audioContext = new AudioContext();
+		const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+		this.audioContext = new AudioContextClass();
 		this.isReady = false;
 		this.count = 0;
+		this.rafId = 0;
+		this.isDestroyed = false;
+	}
+
+	// A context created outside a user gesture starts "suspended" and plays silence
+	// once the <audio> element is routed through it, so it must be resumed explicitly.
+	resume() {
+		if (this.audioContext.state === 'suspended') {
+			this.audioContext.resume().catch(ignoreError);
+		}
+	}
+
+	destroy() {
+		this.isDestroyed = true;
+		cancelAnimationFrame(this.rafId);
+		this.source?.disconnect();
+		this.analyser1?.analyser.disconnect();
+		this.analyser2?.analyser.disconnect();
+		if (this.audioContext.state !== 'closed') this.audioContext.close().catch(ignoreError);
 	}
 
 	init() {
@@ -196,17 +222,19 @@ class Sound {
 			radius: 350,
 			isAlpha: false,
 		});
-		this.render();
-		this.isReady = true;
 		this.source = this.audioContext.createMediaElementSource(this.audio);
 		this.source.connect(this.analyser1.analyser);
 		this.source.connect(this.analyser2.analyser);
 		this.source.connect(this.audioContext.destination);
+		this.resume();
+		this.isReady = true;
+		this.render();
 	}
 
 	render() {
+		if (this.isDestroyed) return;
 		this.visual.draw();
-		requestAnimationFrame(this.render.bind(this));
+		this.rafId = requestAnimationFrame(() => this.render());
 	}
 }
 
@@ -215,9 +243,17 @@ export class Visualizer {
 		this.canvas = element;
 		this.canvasContext = this.canvas.getContext('2d');
 
+		this.tick = 0;
 		this.sound = new Sound(this, audio);
 		this.sound.init();
-		this.tick = 0;
+	}
+
+	resume() {
+		this.sound.resume();
+	}
+
+	destroy() {
+		this.sound.destroy();
 	}
 
 	setSize(width, height) {

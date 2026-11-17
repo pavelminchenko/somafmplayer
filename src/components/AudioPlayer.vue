@@ -11,6 +11,7 @@ const mainStore = useMainStore();
 
 <template>
 	<AppContainer class="audio-player">
+		<p v-if="mainStore.channelError" class="error" role="alert">{{ mainStore.channelError }}</p>
 		<AppTransition name="fade">
 			<div v-if="!mainStore.streamUrl" class="title">
 				<h1>SomaFM Radio</h1>
@@ -47,6 +48,17 @@ const mainStore = useMainStore();
 	@include media(max-width-sm) {
 		width: 100%;
 	}
+}
+
+.error {
+	position: absolute;
+	top: 0.625rem;
+	left: 0;
+	z-index: 2;
+	width: 100%;
+	padding: 0 1.25rem;
+	text-align: center;
+	color: $color-tertiary;
 }
 
 .title {

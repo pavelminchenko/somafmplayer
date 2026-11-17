@@ -12,6 +12,7 @@ async function useApi<T>({
 	responseHandler,
 	headers,
 	body,
+	signal,
 }: ApiParams): Promise<T> {
 	return await useFetch({
 		url: baseUrl + url,
@@ -19,36 +20,42 @@ async function useApi<T>({
 		responseHandler,
 		headers,
 		body,
+		signal,
 	});
 }
 
 export const api = {
-	async getChannels() {
+	async getChannels(signal?: AbortSignal) {
 		const { channels }: { channels: Channel[] } = await useApi({
 			url: '/channels.json',
 			method: 'get',
+			signal,
 		});
 		return channels;
 	},
 
-	async getChannelSongs(channelId: string) {
+	async getChannelSongs(channelId: string, signal?: AbortSignal) {
 		const { songs }: { songs: Channel['songs'] } = await useApi({
-			url: `/songs/${channelId}.json`,
+			url: `/songs/${encodeURIComponent(channelId)}.json`,
 			method: 'get',
+			signal,
 		});
 		return songs;
 	},
 
-	async getStreamUrl(playlistUrl: string) {
+	async getStreamUrl(playlistUrl: string, signal?: AbortSignal) {
 		const playlist: string = await useApi({
 			baseUrl: '',
 			url: playlistUrl,
 			method: 'get',
 			responseHandler: 'text',
+			signal,
 		});
-		const lines = playlist.split('\n');
-		const regex = /https?:\/\//;
-		const streamLine = lines.find((el: string) => el.match(regex)) ?? '';
-		return streamLine.slice(streamLine.search(regex));
+		const streamLine = playlist
+			.split(/\r?\n/)
+			.map((line) => line.trim())
+			.find((line) => /^(?:[^=]+=)?https?:\/\//.test(line));
+		if (!streamLine) throw new Error('Stream URL not found in playlist');
+		return streamLine.slice(streamLine.search(/https?:\/\//));
 	},
 };

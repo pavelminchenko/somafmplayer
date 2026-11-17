@@ -1,40 +1,22 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue';
-import { api } from '@/api';
+import { useDocumentVisibility, useIntervalFn } from '@vueuse/core';
+import { computed } from 'vue';
 import { useMainStore } from '@/stores/main-store';
 
+const SONGS_REFRESH_INTERVAL = 15000;
+
 const mainStore = useMainStore();
+const visibility = useDocumentVisibility();
 
 const currentSongInfo = computed(() => {
-	if (mainStore.currentChannel && mainStore.currentChannel.songs.length > 0) {
-		const { artist, title } = mainStore.currentChannel.songs[0];
-		return `${artist} - ${title}`;
-	}
-	return '';
+	const song = mainStore.currentChannel?.songs[0];
+	return song ? `${song.artist} - ${song.title}` : '';
 });
 
-const updateCurrentSongInfo = async () => {
-	if (mainStore.currentChannel && Object.keys(mainStore.currentChannel).length > 0) {
-		mainStore.currentChannel.songs = await api.getChannelSongs(mainStore.currentChannel.id);
-	}
-};
-
-let timer: ReturnType<typeof setTimeout>;
-
-watch(
-	() => mainStore.currentChannel,
-	(currentChannel) => {
-		clearInterval(timer);
-		if (currentChannel && Object.keys(currentChannel).length > 0) {
-			timer = setInterval(async () => {
-				await updateCurrentSongInfo();
-			}, 15000);
-		} else {
-			clearInterval(timer);
-		}
-	},
-	{ immediate: true },
-);
+// Stopped automatically on unmount; skipped while the tab is hidden.
+useIntervalFn(async () => {
+	if (visibility.value === 'visible') await mainStore.refreshCurrentSongs();
+}, SONGS_REFRESH_INTERVAL);
 </script>
 
 <template>

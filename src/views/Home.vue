@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
-import { api } from '@/api';
+import { onMounted, onUnmounted } from 'vue';
 import AppTransition from '@/components/AppTransition.vue';
 import AudioPlayer from '@/components/AudioPlayer.vue';
 import ChannelList from '@/components/ChannelList.vue';
@@ -14,14 +13,21 @@ const mainStore = useMainStore();
 
 const screenSize = useScreenSize();
 
+let preloaderTimer: ReturnType<typeof setTimeout> | undefined;
+
 function hidePagePreloader() {
-	setTimeout(() => (mainStore.pageLoading = false), 500);
+	preloaderTimer = setTimeout(() => (mainStore.pageLoading = false), 500);
 }
 
-onMounted(async () => {
-	mainStore.channels = await api.getChannels();
+async function loadChannels() {
+	mainStore.pageLoading = true;
+	await mainStore.loadChannels();
+	// Hide the preloader on failure too, otherwise the user is stuck on it forever.
 	hidePagePreloader();
-});
+}
+
+onMounted(loadChannels);
+onUnmounted(() => clearTimeout(preloaderTimer));
 </script>
 
 <template>
@@ -32,6 +38,10 @@ onMounted(async () => {
 		<div class="radio">
 			<MobileHeader v-if="screenSize['max-width-sm']" />
 			<ToggleChannelsButton v-if="screenSize['max-width-md']" />
+			<div v-if="mainStore.channelsError" class="channels-error" role="alert">
+				<p>Failed to load channels</p>
+				<button type="button" @click="loadChannels">Retry</button>
+			</div>
 			<div class="player" :class="{ 'channels-open': mainStore.mobileChannelsOpen }">
 				<ChannelList :data="mainStore.channels" />
 				<AudioPlayer />
@@ -51,6 +61,27 @@ onMounted(async () => {
 	flex-wrap: wrap;
 	place-content: center;
 	height: 100dvh;
+}
+
+.channels-error {
+	position: absolute;
+	inset: 0;
+	z-index: 30;
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+	align-items: center;
+	justify-content: center;
+	color: $color-secondary-light-1;
+	background: color-mix(in hsl, $color-primary-dark-2 90%, transparent);
+
+	button {
+		padding: 0.5rem 1.5rem;
+		border: 0.0625rem solid currentcolor;
+		border-radius: $border-radius;
+		color: inherit;
+		cursor: pointer;
+	}
 }
 
 .radio {
