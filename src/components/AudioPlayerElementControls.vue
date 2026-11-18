@@ -71,7 +71,7 @@ function controlVolume(event: Event) {
 			:class="props.isPlaying ? 'icon-pause' : 'icon-play'"
 			@click="updatePlayback"
 		>
-			Playback
+			{{ props.isPlaying ? 'Pause' : 'Play' }}
 		</button>
 		<button type="button" class="icon-previous prev-button" @click="goToPreviousChannel">
 			Previous channel
@@ -86,11 +86,12 @@ function controlVolume(event: Event) {
 				:class="isMuted ? 'icon-mute' : 'icon-volume'"
 				@click="toggleVolume"
 			>
-				Toggle volume
+				{{ isMuted ? 'Unmute' : 'Mute' }}
 			</button>
 			<div class="volumebar" :style="{ backgroundSize: `${props.volume * 100}% 100%` }">
 				<input
 					type="range"
+					aria-label="Volume"
 					min="0"
 					max="1"
 					step="0.01"

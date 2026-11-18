@@ -1,6 +1,6 @@
+import { useMediaQuery } from '@vueuse/core';
 import { reactive, type Ref } from 'vue';
 import mediaQueries from '@/assets/styles/export/_media-queries.module.scss';
-import { useMediaQuery } from '@/composables/media-query';
 
 export function useScreenSize() {
 	return reactive(

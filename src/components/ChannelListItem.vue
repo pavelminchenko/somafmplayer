@@ -26,7 +26,9 @@ const setCurrentChannel = async () => {
 				<div class="title">{{ props.data.title }}</div>
 				<div class="genre">{{ props.data.genre }}</div>
 			</div>
-			<button type="button" class="channel-button" @click="setCurrentChannel">Chose channel</button>
+			<button type="button" class="channel-button" @click="setCurrentChannel">
+				Play {{ props.data.title }}
+			</button>
 		</div>
 	</div>
 </template>

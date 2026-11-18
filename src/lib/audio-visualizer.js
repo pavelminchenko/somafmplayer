@@ -37,7 +37,15 @@ class Analyser {
 		this.radiusOffset = 16 * this.offset;
 		this.count = 0;
 
-		this.stockSpectrums = [];
+		// Pre-allocated buffers: a ring of the last (delay + 1) analyser frames and a shared
+		// "silence" frame, so update() makes no per-frame allocations.
+		this.delay = Math.max(0, this.offset);
+		this.spectrumRing = Array.from(
+			{ length: this.delay + 1 },
+			() => new Float32Array(this.frequencyNum),
+		);
+		this.ringHead = 0;
+		this.silence = new Float32Array(this.frequencyNum);
 
 		this.sourceStart = Math.ceil((this.frequencyNum * this.minHz) / this.hz);
 		this.sourceEnd = Math.round((this.frequencyNum * this.maxHz) / this.hz);
@@ -49,6 +57,8 @@ class Analyser {
 		this.interval = (this.sourceLength - 1) / (this.distLength - 1);
 
 		this.totalLength = Math.round((this.distLength * 3) / 2);
+
+		this.frequencyArray = new Float64Array(this.distLength);
 	}
 
 	adjustFrequency(i, avr) {
@@ -62,30 +72,19 @@ class Analyser {
 	}
 
 	update() {
-		const spectrums = new Float32Array(this.frequencyNum);
 		if (this.audio.isReady) {
-			this.analyser.getFloatFrequencyData(spectrums);
-			this.stockSpectrums.push(spectrums);
-		}
+			const ringLength = this.spectrumRing.length;
+			this.analyser.getFloatFrequencyData(this.spectrumRing[this.ringHead]);
 
-		if (this.count < this.offset) {
-			this.spectrums = new Float32Array(this.frequencyNum);
-		} else {
-			if (this.audio.isReady) {
-				const _spectrums = this.stockSpectrums[0];
+			// Frame captured `delay` updates ago (the current one when delay is 0).
+			const delayed = this.spectrumRing[(this.ringHead - this.delay + ringLength) % ringLength];
+			this.spectrums =
+				this.count < this.offset || !Number.isFinite(delayed[0]) ? this.silence : delayed;
 
-				this.spectrums = Number.isFinite(_spectrums[0])
-					? _spectrums
-					: new Float32Array(this.frequencyNum);
-
-				this.stockSpectrums.shift();
-			} else {
-				this.spectrums = new Float32Array(this.frequencyNum);
-			}
-		}
-
-		if (this.audio.isReady) {
+			this.ringHead = (this.ringHead + 1) % ringLength;
 			this.count++;
+		} else {
+			this.spectrums = this.silence;
 		}
 
 		const canvasContext = this.visual.canvasContext;
@@ -104,7 +103,7 @@ class Analyser {
 
 		canvasContext.beginPath();
 
-		const frequencyArray = [];
+		const frequencyArray = this.frequencyArray;
 
 		for (let i = 0; i < this.distLength; i++) {
 			const n1 = Math.floor(i * this.interval);
@@ -130,7 +129,7 @@ class Analyser {
 
 			let targetFrequency = a0 * mu * mu2 + a1 * mu2 + a2 * mu + p1;
 			targetFrequency = Math.max(0, targetFrequency);
-			frequencyArray.push(targetFrequency);
+			frequencyArray[i] = targetFrequency;
 
 			const pos = this.visual.calcPolorCoord(
 				(i + this.visual.tick + this.offset) / (this.totalLength - 1),

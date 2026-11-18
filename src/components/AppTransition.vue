@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed, toRaw } from 'vue';
-import { copyObject } from '@/utils';
+import { computed } from 'vue';
 
 type Props = {
 	name: 'fade';
@@ -43,8 +42,11 @@ const props = withDefaults(defineProps<Props>(), {
 	leaveToClass: undefined,
 });
 
-const transitionProps = copyObject(toRaw(props), {
-	exclude: props.group ? ['group', 'mode'] : ['group', 'tag', 'moveClass'],
+// Reactive on purpose: a one-off copy would ignore later prop changes.
+// <transition-group> has no `mode`; <transition> has no `tag`/`moveClass`.
+const transitionProps = computed(() => {
+	const { group, mode, tag, moveClass, ...shared } = props;
+	return group ? { ...shared, tag, moveClass } : { ...shared, mode };
 });
 const transitionDuration = computed(() => `${props.duration}ms`);
 </script>
