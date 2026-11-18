@@ -8,7 +8,6 @@ export default defineConfig({
 	base: '/',
 
 	server: {
-		host: true,
 		port: 3000,
 		strictPort: true,
 	},
