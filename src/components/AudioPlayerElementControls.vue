@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed } from 'vue';
 import { useMainStore } from '@/stores/main-store';
-import type { Channel } from '@/types';
 
 const props = defineProps<{
 	isPlaying: boolean;
@@ -15,50 +14,26 @@ const emit = defineEmits<{
 
 const mainStore = useMainStore();
 
+// Volume shown before muting, restored by the mute button.
+let volumeBeforeMute = 1;
+const isMuted = computed(() => props.volume === 0);
+
 function updatePlayback() {
 	emit('update:playback', props.isPlaying);
 }
 
-function getChannelIndex(channel: Channel) {
-	return mainStore.channels.findIndex(({ id }) => channel.id === id);
-}
-
-async function goToPreviousChannel() {
-	const currentChannelIndex = getChannelIndex(mainStore.currentChannel as Channel);
-	if (currentChannelIndex > 0) {
-		await mainStore.setCurrentChannel(mainStore.channels[currentChannelIndex - 1]);
-	}
-}
-
-async function goToNextChannel() {
-	const currentChannelIndex = getChannelIndex(mainStore.currentChannel as Channel);
-	if (currentChannelIndex < mainStore.channels.length - 1) {
-		await mainStore.setCurrentChannel(mainStore.channels[currentChannelIndex + 1]);
-	}
-}
-
-const isMuted = ref(false);
-const savedVolume = ref(1);
-
 function toggleVolume() {
 	if (isMuted.value) {
-		isMuted.value = false;
-		emit('update:volume', savedVolume.value);
+		emit('update:volume', volumeBeforeMute);
 	} else {
-		isMuted.value = true;
-		savedVolume.value = props.volume;
+		volumeBeforeMute = props.volume;
 		emit('update:volume', 0);
 	}
 }
 
 function controlVolume(event: Event) {
 	const volume = Number((event.target as HTMLInputElement).value);
-	if (volume === 0) {
-		isMuted.value = true;
-		savedVolume.value = 1;
-	} else {
-		isMuted.value = false;
-	}
+	if (volume > 0) volumeBeforeMute = volume;
 	emit('update:volume', volume);
 }
 </script>
@@ -73,10 +48,14 @@ function controlVolume(event: Event) {
 		>
 			{{ props.isPlaying ? 'Pause' : 'Play' }}
 		</button>
-		<button type="button" class="icon-previous prev-button" @click="goToPreviousChannel">
+		<button
+			type="button"
+			class="icon-previous prev-button"
+			@click="mainStore.selectAdjacentChannel(-1)"
+		>
 			Previous channel
 		</button>
-		<button type="button" class="icon-next next-button" @click="goToNextChannel">
+		<button type="button" class="icon-next next-button" @click="mainStore.selectAdjacentChannel(1)">
 			Next channel
 		</button>
 		<div class="volume">

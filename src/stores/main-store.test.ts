@@ -219,3 +219,56 @@ describe('loadChannels', () => {
 		expect(store.channels).toHaveLength(1);
 	});
 });
+
+async function startOn(id: string) {
+	mocked.getStreamUrl.mockResolvedValue('https://ice1.somafm.com/x');
+	mocked.getChannelSongs.mockResolvedValue([]);
+	const store = useMainStore();
+	store.channels = ['a', 'b', 'c'].map((channelId) => makeChannel(channelId));
+	await store.setCurrentChannel(makeChannel(id));
+	return store;
+}
+
+describe('selectAdjacentChannel', () => {
+	it('moves to the next and previous channel in list order', async () => {
+		const store = await startOn('b');
+
+		await store.selectAdjacentChannel(1);
+		expect(store.currentChannel?.id).toBe('c');
+
+		await store.selectAdjacentChannel(-1);
+		await store.selectAdjacentChannel(-1);
+		expect(store.currentChannel?.id).toBe('a');
+	});
+
+	it('stays put at both ends of the list', async () => {
+		const store = await startOn('a');
+		await store.selectAdjacentChannel(-1);
+		expect(store.currentChannel?.id).toBe('a');
+
+		await store.setCurrentChannel(makeChannel('c'));
+		await store.selectAdjacentChannel(1);
+		expect(store.currentChannel?.id).toBe('c');
+	});
+
+	it('keeps moving on quick repeated clicks while a channel is still loading', async () => {
+		const store = await startOn('a');
+		const gate = deferred<string>();
+		mocked.getStreamUrl.mockReturnValue(gate.promise);
+
+		const first = store.selectAdjacentChannel(1); // a -> b (still loading)
+		const second = store.selectAdjacentChannel(1); // should go b -> c, not retry b
+		gate.resolve('https://ice1.somafm.com/y');
+		await Promise.all([first, second]);
+
+		expect(store.currentChannel?.id).toBe('c');
+	});
+
+	it('does nothing before any channel is selected', async () => {
+		const store = useMainStore();
+		store.channels = [makeChannel('a')];
+		await store.selectAdjacentChannel(1);
+		expect(store.currentChannel).toBeNull();
+		expect(mocked.getStreamUrl).not.toHaveBeenCalled();
+	});
+});

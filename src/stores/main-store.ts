@@ -15,6 +15,8 @@ export const useMainStore = defineStore('main-store', {
 		channels: [] as Channel[],
 		channelsError: '',
 		currentChannel: null as Channel | null,
+		// Last channel the user asked for; differs from `currentChannel` while it loads or failed.
+		requestedChannelId: '',
 		channelLoading: false,
 		channelError: '',
 		streamUrl: '',
@@ -32,6 +34,8 @@ export const useMainStore = defineStore('main-store', {
 
 		async setCurrentChannel(channel: Channel) {
 			if (this.currentChannel?.id === channel.id && !this.channelError) return;
+
+			this.requestedChannelId = channel.id;
 
 			// Cancel the previous request so a slow response can't overwrite a newer choice.
 			channelRequest?.abort();
@@ -72,6 +76,15 @@ export const useMainStore = defineStore('main-store', {
 					this.channelLoading = false;
 				}
 			}
+		},
+
+		/** Switches to the previous (-1) or next (1) channel in list order. */
+		async selectAdjacentChannel(step: -1 | 1) {
+			// Based on the last request so quick repeated clicks keep moving instead of retrying one target.
+			const fromId = this.requestedChannelId || this.currentChannel?.id;
+			const index = this.channels.findIndex(({ id }) => id === fromId);
+			const target = index === -1 ? undefined : this.channels[index + step];
+			if (target) await this.setCurrentChannel(target);
 		},
 
 		async refreshCurrentSongs() {

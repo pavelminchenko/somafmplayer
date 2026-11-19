@@ -1,14 +1,22 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { useStorage } from '@vueuse/core';
+import { ref, watchEffect } from 'vue';
 import AudioPlayerElementControls from '@/components/AudioPlayerElementControls.vue';
 import AudioPlayerElementVisualizer from '@/components/AudioPlayerElementVisualizer.vue';
+import { useMediaSession } from '@/composables/media-session';
+import { useMainStore } from '@/stores/main-store';
 
 const props = defineProps<{ src: string }>();
 
 const audio = ref<HTMLAudioElement | null>(null);
 const isPlaying = ref(false);
 const isWaiting = ref(false);
-const volume = ref(1);
+// Persisted between visits; anything that is not a number in [0, 1] falls back to full volume.
+const volume = useStorage('somafm-player:volume', 1);
+if (!(volume.value >= 0 && volume.value <= 1)) volume.value = 1;
+watchEffect(() => {
+	if (audio.value) audio.value.volume = volume.value;
+});
 const errorMessage = ref('');
 // Set when the user pauses on purpose, so `canplay` doesn't resume playback behind their back.
 let pausedByUser = false;
@@ -46,9 +54,16 @@ async function updatePlayback(isCurrentlyPlaying: boolean) {
 }
 
 function updateVolume(value: number) {
-	if (audio.value) audio.value.volume = value;
 	volume.value = value;
 }
+
+const mainStore = useMainStore();
+useMediaSession(isPlaying, {
+	play: () => updatePlayback(false),
+	pause: () => updatePlayback(true),
+	previous: () => mainStore.selectAdjacentChannel(-1),
+	next: () => mainStore.selectAdjacentChannel(1),
+});
 
 const eventListeners = {
 	loadstart() {

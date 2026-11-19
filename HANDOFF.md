@@ -117,7 +117,7 @@ npm test                             # Vitest
 
 ### Приоритет 2: тесты (частично сделано)
 
-3. ✅ Подключён Vitest (`npm test`), 25 тестов: `src/api.test.ts` (парсинг `.pls`,
+3. ✅ Подключён Vitest (`npm test`), 33 теста: `src/api.test.ts` (парсинг `.pls`,
    `toTrustedHttpsUrl`, чужие/похожие хосты, кодирование `channelId`) и
    `src/stores/main-store.test.ts` (гонка A→B, abort, ошибка стрима, канал без
    плейлистов, повтор после ошибки, устаревший ответ опроса песен). Тест гонки
@@ -139,10 +139,18 @@ npm test                             # Vitest
    рисуется, звук идёт через `AudioContext`.
 7. `src/router/layout-middleware.ts` избыточен для одного layout: типизировать
    `RouteMeta` или подключить layout статически.
-8. Кэшировать `getChannels` (sessionStorage / stale-while-revalidate),
-   добавить `<link rel="preconnect" href="https://api.somafm.com">`.
-9. Сохранять громкость и последний канал через VueUse `useStorage`.
-10. Media Session API (`navigator.mediaSession`): медиаклавиши, экран блокировки.
+8. `<link rel="preconnect" href="https://api.somafm.com">` добавлен в `index.html`.
+   Осталось: кэшировать `getChannels` (sessionStorage / stale-while-revalidate).
+9. ✅ Громкость сохраняется (`useStorage`, ключ `somafm-player:volume`, мусор в
+   хранилище сбрасывается на 1); mute определяется по `volume === 0`. Последний
+   канал пока не сохраняется (автозапуск звука после перезагрузки браузеры
+   блокируют, так что это только подсветка в списке).
+10. ✅ Media Session (`src/composables/media-session.ts`): метаданные (песня,
+    исполнитель, канал, обложка), состояние play/pause, медиаклавиши
+    play/pause/previous/next. Логика «предыдущий/следующий канал» перенесена в
+    `store.selectAdjacentChannel` (быстрые повторные клики двигаются дальше).
+    Проверено в Chromium через перехват `setActionHandler`; на реальной
+    блокировке экрана/гарнитуре не проверялось.
 11. Холст визуализатора: учитывать `devicePixelRatio`, задавать размер через
     CSS (сейчас 1000×1000 / 1500×1500 px bitmap).
 12. Семантика списка каналов (`<ul>/<li>`), индикатор буферизации
