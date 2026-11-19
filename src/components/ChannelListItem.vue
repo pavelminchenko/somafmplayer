@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import AppImage from '@/components/AppImage.vue';
 import { useMainStore } from '@/stores/main-store';
-import type { Channel } from '@/types';
+import type { ChannelSummary } from '@/types';
 
 const props = defineProps<{
-	data: Channel;
+	data: ChannelSummary;
 }>();
 
 const mainStore = useMainStore();

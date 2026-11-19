@@ -1,4 +1,13 @@
-export interface Channel {
+export interface Song {
+	title: string;
+	artist: string;
+	album: string;
+	albumart: string;
+	date: string;
+}
+
+/** A channel as listed by `channels.json` (no song history). */
+export interface ChannelSummary {
 	id: string;
 	title: string;
 	description: string;
@@ -14,11 +23,9 @@ export interface Channel {
 	preroll: unknown[];
 	listeners: string;
 	lastPlaying: string;
-	songs: {
-		title: string;
-		artist: string;
-		album: string;
-		albumart: string;
-		date: string;
-	}[];
+}
+
+/** The channel being played: its summary plus the recently played songs. */
+export interface Channel extends ChannelSummary {
+	songs: Song[];
 }

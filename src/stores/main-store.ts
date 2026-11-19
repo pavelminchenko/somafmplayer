@@ -1,21 +1,21 @@
 import { defineStore } from 'pinia';
-import { api, isChannel } from '@/api.ts';
-import { type Channel } from '@/types.ts';
+import { api, isChannelSummary } from '@/api.ts';
+import { type Channel, type ChannelSummary, type Song } from '@/types.ts';
 
 const CHANNELS_CACHE_KEY = 'somafm-player:channels';
 
 let channelRequest: AbortController | undefined;
 
-function readCachedChannels(): Channel[] {
+function readCachedChannels(): ChannelSummary[] {
 	try {
 		const data: unknown = JSON.parse(localStorage.getItem(CHANNELS_CACHE_KEY) ?? '[]');
-		return Array.isArray(data) ? data.filter((item) => isChannel(item)) : [];
+		return Array.isArray(data) ? data.filter((item) => isChannelSummary(item)) : [];
 	} catch {
 		return [];
 	}
 }
 
-function writeCachedChannels(channels: Channel[]) {
+function writeCachedChannels(channels: ChannelSummary[]) {
 	try {
 		localStorage.setItem(CHANNELS_CACHE_KEY, JSON.stringify(channels));
 	} catch {
@@ -31,7 +31,7 @@ export const useMainStore = defineStore('main-store', {
 	state: () => ({
 		pageLoading: true,
 		mobileChannelsOpen: false,
-		channels: [] as Channel[],
+		channels: [] as ChannelSummary[],
 		channelsError: '',
 		currentChannel: null as Channel | null,
 		// Last channel the user asked for; differs from `currentChannel` while it loads or failed.
@@ -66,7 +66,7 @@ export const useMainStore = defineStore('main-store', {
 			}
 		},
 
-		async setCurrentChannel(channel: Channel) {
+		async setCurrentChannel(channel: ChannelSummary) {
 			const isCurrent = this.currentChannel?.id === channel.id && !this.channelError;
 			// Already playing/loading this channel: nothing to do.
 			if (this.requestedChannelId === channel.id && (isCurrent || this.channelLoading)) return;
@@ -100,7 +100,7 @@ export const useMainStore = defineStore('main-store', {
 					// Song history is optional: playback must not depend on it.
 					api.getChannelSongs(channel.id, signal).catch((error: unknown) => {
 						if (signal.aborted) throw error;
-						return [] as Channel['songs'];
+						return [] as Song[];
 					}),
 				]);
 

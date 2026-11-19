@@ -68,21 +68,32 @@ describe('usePlayer state', () => {
 	});
 });
 
+/** Lets the automatic reconnect attempts run out so the final error message is shown. */
+function exhaustReconnects(player: ReturnType<typeof setup>['player'], code: number) {
+	for (let attempt = 0; attempt < 3; attempt++) {
+		player.listeners.error(mediaErrorEvent(code));
+		vi.advanceTimersByTime(10000);
+	}
+}
+
 describe('usePlayer errors', () => {
 	it.each([
 		[2, 'Network error'],
 		[3, 'could not be decoded'],
 		[4, 'unavailable or not supported'],
 		[1, 'Playback error'],
-	])('maps MediaError code %i to a readable message', (code, text) => {
+	])('maps MediaError code %i to a readable message once reconnecting gave up', (code, text) => {
+		vi.useFakeTimers();
 		const { player } = setup();
 		player.listeners.play();
 
+		exhaustReconnects(player, code);
 		player.listeners.error(mediaErrorEvent(code));
 
 		expect(player.errorMessage.value).toContain(text);
 		expect(player.isPlaying.value).toBe(false);
 		expect(player.isWaiting.value).toBe(false);
+		vi.useRealTimers();
 	});
 
 	it('explains a play() blocked by the autoplay policy', async () => {
@@ -102,6 +113,16 @@ describe('usePlayer errors', () => {
 		const { player } = setup(audio);
 
 		await player.listeners.canplay();
+
+		expect(player.errorMessage.value).toBe('');
+	});
+
+	it('leaves load failures to the error event (no competing message from play())', async () => {
+		const audio = makeAudio();
+		audio.play.mockRejectedValueOnce(domError('NotSupportedError'));
+		const { player } = setup(audio);
+
+		await player.resume();
 
 		expect(player.errorMessage.value).toBe('');
 	});
@@ -161,6 +182,99 @@ describe('usePlayer user intent', () => {
 		player.listeners.play();
 		await player.toggle(); // playing -> pause
 		expect(audio.pause).toHaveBeenCalledOnce();
+	});
+});
+
+function setupWithTimers() {
+	vi.useFakeTimers();
+	return setup();
+}
+
+describe('usePlayer automatic reconnect', () => {
+	it('retries with exponential backoff (1 s, 2 s, 4 s) and then gives up', () => {
+		const { audio, player } = setupWithTimers();
+
+		player.listeners.error(mediaErrorEvent(2));
+		expect(player.errorMessage.value).toContain('Reconnecting');
+		vi.advanceTimersByTime(999);
+		expect(audio.load).not.toHaveBeenCalled();
+		vi.advanceTimersByTime(1);
+		expect(audio.load).toHaveBeenCalledTimes(1);
+		expect(audio.play).toHaveBeenCalledTimes(1);
+		player.listeners.loadstart(); // our own reload
+
+		player.listeners.error(mediaErrorEvent(2));
+		vi.advanceTimersByTime(1999);
+		expect(audio.load).toHaveBeenCalledTimes(1);
+		vi.advanceTimersByTime(1);
+		expect(audio.load).toHaveBeenCalledTimes(2);
+		player.listeners.loadstart();
+
+		player.listeners.error(mediaErrorEvent(2));
+		vi.advanceTimersByTime(4000);
+		expect(audio.load).toHaveBeenCalledTimes(3);
+		player.listeners.loadstart();
+
+		player.listeners.error(mediaErrorEvent(2)); // fourth failure: no more retries
+		expect(player.errorMessage.value).toContain('Network error');
+		vi.advanceTimersByTime(60000);
+		expect(audio.load).toHaveBeenCalledTimes(3);
+		vi.useRealTimers();
+	});
+
+	it('resets the backoff and clears the message once playback is back', () => {
+		const { audio, player } = setupWithTimers();
+		player.listeners.error(mediaErrorEvent(2));
+		vi.advanceTimersByTime(1000);
+		player.listeners.loadstart();
+
+		player.listeners.playing();
+		expect(player.errorMessage.value).toBe('');
+
+		player.listeners.error(mediaErrorEvent(2)); // a later drop starts again at 1 s
+		vi.advanceTimersByTime(1000);
+		expect(audio.load).toHaveBeenCalledTimes(2);
+		vi.useRealTimers();
+	});
+
+	it('does not reconnect after the user paused, and pausing cancels a pending retry', () => {
+		const { audio, player } = setupWithTimers();
+
+		player.listeners.error(mediaErrorEvent(2));
+		player.pause();
+		vi.advanceTimersByTime(10000);
+		expect(audio.load).not.toHaveBeenCalled();
+
+		player.listeners.error(mediaErrorEvent(2));
+		expect(player.errorMessage.value).toContain('Network error');
+		vi.advanceTimersByTime(10000);
+		expect(audio.load).not.toHaveBeenCalled();
+		vi.useRealTimers();
+	});
+
+	it('starts over for a new stream (channel switch)', () => {
+		const { audio, player } = setupWithTimers();
+		player.listeners.error(mediaErrorEvent(2)); // retry pending for the old stream
+
+		player.listeners.loadstart(); // a different stream starts loading
+		vi.advanceTimersByTime(10000);
+		expect(audio.load).not.toHaveBeenCalled(); // the old retry was dropped
+
+		player.listeners.error(mediaErrorEvent(2));
+		vi.advanceTimersByTime(1000); // counter was reset: first retry again after 1 s
+		expect(audio.load).toHaveBeenCalledTimes(1);
+		vi.useRealTimers();
+	});
+
+	it('stops retrying when the player is disposed', () => {
+		const { audio, player, scope } = setupWithTimers();
+		player.listeners.error(mediaErrorEvent(2));
+
+		scope.stop();
+		vi.advanceTimersByTime(10000);
+
+		expect(audio.load).not.toHaveBeenCalled();
+		vi.useRealTimers();
 	});
 });
 

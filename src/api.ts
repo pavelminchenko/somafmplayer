@@ -1,5 +1,5 @@
 import { useFetch } from '@/composables/fetch';
-import type { Channel } from '@/types';
+import type { ChannelSummary, Song } from '@/types';
 
 type ApiParams = Parameters<typeof useFetch>[0] & { baseUrl?: string };
 
@@ -28,7 +28,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Minimal runtime check of what the app relies on; anything else from the API is dropped. */
-function isChannel(value: unknown): value is Channel {
+function isChannelSummary(value: unknown): value is ChannelSummary {
 	if (!isRecord(value)) return false;
 	const { id, title, playlists } = value;
 	return (
@@ -39,7 +39,7 @@ function isChannel(value: unknown): value is Channel {
 	);
 }
 
-function isSong(value: unknown): value is Channel['songs'][number] {
+function isSong(value: unknown): value is Song {
 	return isRecord(value) && typeof value.title === 'string' && typeof value.artist === 'string';
 }
 
@@ -70,7 +70,7 @@ export const api = {
 			signal,
 		});
 		if (!Array.isArray(response.channels)) throw new Error('Unexpected channels response');
-		return response.channels.filter((channel) => isChannel(channel));
+		return response.channels.filter((channel) => isChannelSummary(channel));
 	},
 
 	async getChannelSongs(channelId: string, signal?: AbortSignal) {
@@ -100,4 +100,4 @@ export const api = {
 	},
 };
 
-export { isChannel };
+export { isChannelSummary };

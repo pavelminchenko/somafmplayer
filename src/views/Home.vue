@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue';
+import { onMounted } from 'vue';
 import AppTransition from '@/components/AppTransition.vue';
 import AudioPlayer from '@/components/AudioPlayer.vue';
 import ChannelList from '@/components/ChannelList.vue';
@@ -13,21 +13,14 @@ const mainStore = useMainStore();
 
 const screenSize = useScreenSize();
 
-let preloaderTimer: ReturnType<typeof setTimeout> | undefined;
-
-function hidePagePreloader() {
-	preloaderTimer = setTimeout(() => (mainStore.pageLoading = false), 500);
-}
-
 async function loadChannels() {
 	mainStore.pageLoading = true;
 	await mainStore.loadChannels();
 	// Hide the preloader on failure too, otherwise the user is stuck on it forever.
-	hidePagePreloader();
+	mainStore.pageLoading = false;
 }
 
 onMounted(loadChannels);
-onUnmounted(() => clearTimeout(preloaderTimer));
 </script>
 
 <template>

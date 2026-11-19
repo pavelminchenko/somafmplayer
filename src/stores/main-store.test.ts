@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '@/api.ts';
 import { useMainStore } from '@/stores/main-store';
-import type { Channel } from '@/types';
+import type { ChannelSummary } from '@/types';
 
 vi.mock('@/api.ts', async (importOriginal) => ({
 	...(await importOriginal<typeof import('@/api.ts')>()),
@@ -13,7 +13,7 @@ vi.mock('@/api.ts', async (importOriginal) => ({
 const mocked = vi.mocked(api);
 
 function makeChannel(id: string, playlists = [{ url: `https://api.somafm.com/${id}.pls` }]) {
-	return { id, title: id.toUpperCase(), playlists, songs: [] } as unknown as Channel;
+	return { id, title: id.toUpperCase(), playlists } as unknown as ChannelSummary;
 }
 
 function song(title: string) {
@@ -288,7 +288,7 @@ describe('loadChannels', () => {
 
 	it('shows the cached list immediately and refreshes it in the background', async () => {
 		stubStorage({ [CACHE_KEY]: JSON.stringify([makeChannel('old')]) });
-		const network = deferred<Channel[]>();
+		const network = deferred<ChannelSummary[]>();
 		mocked.getChannels.mockReturnValueOnce(network.promise);
 		const store = useMainStore();
 
