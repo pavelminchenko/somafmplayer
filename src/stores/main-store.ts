@@ -57,6 +57,9 @@ export const useMainStore = defineStore('main-store', {
 					}),
 				]);
 
+				// A replaced request may still resolve (e.g. abort raced with the response body).
+				if (signal.aborted) return;
+
 				// Commit everything at once so the title, songs and stream never diverge.
 				this.currentChannel = { ...channel, songs };
 				this.streamUrl = streamUrl;

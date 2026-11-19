@@ -22,6 +22,7 @@ npm run dev        # http://localhost:3000
 npx vue-tsc --build --force          # типы
 npx eslint "src/**/*.{vue,ts,js}"    # линт (см. примечание про CRLF ниже)
 npx vite build                       # сборка
+npm test                             # Vitest
 ```
 
 Стартовый промпт для новой сессии (скопируйте):
@@ -108,13 +109,18 @@ npx vite build                       # сборка
      `npm-check-updates`, `npm-run-all2`, `sass`.
    Делать по одному, после каждого: `vue-tsc`, `eslint`, `stylelint`, `vite build`.
 
-### Приоритет 2: тесты
+### Приоритет 2: тесты (частично сделано)
 
-3. Подключить Vitest (тестов в проекте нет вообще) и покрыть:
-   - `main-store`: гонка A→B, ошибка стрима, канал без плейлистов;
-   - `api.getStreamUrl` и `toTrustedHttpsUrl`: CRLF, `http`→`https`, чужой хост,
-     пустой плейлист;
-   - визуализатор: перенести сверку «старый/новый» в постоянный тест.
+3. ✅ Подключён Vitest (`npm test`), 21 тест: `src/api.test.ts` (парсинг `.pls`,
+   `toTrustedHttpsUrl`, чужие/похожие хосты, кодирование `channelId`) и
+   `src/stores/main-store.test.ts` (гонка A→B, abort, ошибка стрима, канал без
+   плейлистов, повтор после ошибки, устаревший ответ опроса песен). Тест гонки
+   нашёл реальный дефект (запоздавший ответ заменённого канала перезаписывал
+   новый выбор): в `setCurrentChannel` добавлена проверка `signal.aborted`.
+   - Vitest закреплён на `^1.6.1`: новее требуют Vite ≥ 6, а `html-validate@8.9`
+     допускает только `vitest ^0.34 || ^1`. После обновления Vite поднять Vitest.
+   - Осталось: тест визуализатора (сверка кольца буферов с эталоном) и
+     компонентные тесты (`@vue/test-utils`) для `AudioPlayerElement`.
 
 ### Приоритет 3: рефакторинг (по желанию)
 
@@ -157,6 +163,7 @@ src/
   api.ts                      запросы к SomaFM, валидация URL
   stores/main-store.ts        Pinia: каналы, текущий канал, стрим, ошибки
   composables/                fetch, screen-size (VueUse useMediaQuery)
+  *.test.ts                   Vitest (api, store)
   components/                 AudioPlayer*, Channel*, App*
   lib/audio-visualizer.js     Web Audio API + canvas (без типов)
   views/Home.vue              главная страница
