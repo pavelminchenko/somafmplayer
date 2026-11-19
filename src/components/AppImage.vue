@@ -31,9 +31,12 @@ const props = withDefaults(defineProps<Props>(), {
 const [DefineTemplate, ReuseTemplate] = createReusableTemplate();
 
 const status = ref<'loading' | 'loaded' | 'error'>('loading');
-const isExternal = computed(() => props.src.search(/^https?:\/\//) !== -1);
+const isExternal = computed(() => /^https?:\/\//.test(props.src));
+// External images are always requested over HTTPS (no mixed content, no plain-text requests).
 const imgUrl = computed(() =>
-	isExternal.value ? props.src : new URL(`../assets/images/${props.src}`, import.meta.url).href,
+	isExternal.value
+		? props.src.replace(/^http:/, 'https:')
+		: new URL(`../assets/images/${props.src}`, import.meta.url).href,
 );
 const imgSrc = computed(() => (status.value === 'error' ? noImage : imgUrl.value));
 const preloaderSize = computed(() => `${props.preloaderSizePercent}%`);

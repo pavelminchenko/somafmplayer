@@ -1,111 +1,24 @@
 <script setup lang="ts">
-import { useStorage } from '@vueuse/core';
-import { ref, watchEffect } from 'vue';
+import { ref } from 'vue';
 import AudioPlayerElementControls from '@/components/AudioPlayerElementControls.vue';
 import AudioPlayerElementVisualizer from '@/components/AudioPlayerElementVisualizer.vue';
 import { useMediaSession } from '@/composables/media-session';
+import { usePlayer } from '@/composables/player';
 import { useMainStore } from '@/stores/main-store';
 
 const props = defineProps<{ src: string }>();
 
 const audio = ref<HTMLAudioElement | null>(null);
-const isPlaying = ref(false);
-const isWaiting = ref(false);
-// Persisted between visits; anything that is not a number in [0, 1] falls back to full volume.
-const volume = useStorage('somafm-player:volume', 1);
-if (!(volume.value >= 0 && volume.value <= 1)) volume.value = 1;
-watchEffect(() => {
-	if (audio.value) audio.value.volume = volume.value;
-});
-const errorMessage = ref('');
-// Set when the user pauses on purpose, so `canplay` doesn't resume playback behind their back.
-let pausedByUser = false;
-
-const mediaErrorMessages: Record<number, string> = {
-	[MediaError.MEDIA_ERR_NETWORK]: 'Network error while loading the stream',
-	[MediaError.MEDIA_ERR_DECODE]: 'The stream could not be decoded',
-	[MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED]: 'The stream is unavailable or not supported',
-};
-
-async function play() {
-	if (!audio.value) return;
-	try {
-		await audio.value.play();
-	} catch (error) {
-		// AbortError: play() was interrupted by a new load/pause, which is expected.
-		if (error instanceof DOMException && error.name === 'AbortError') return;
-		isPlaying.value = false;
-		errorMessage.value =
-			error instanceof DOMException && error.name === 'NotAllowedError'
-				? 'Playback was blocked by the browser. Press play to start.'
-				: 'Unable to start playback';
-	}
-}
-
-async function updatePlayback(isCurrentlyPlaying: boolean) {
-	if (!audio.value) return;
-	pausedByUser = isCurrentlyPlaying;
-	if (isCurrentlyPlaying) {
-		audio.value.pause();
-	} else {
-		errorMessage.value = '';
-		await play();
-	}
-}
-
-function updateVolume(value: number) {
-	volume.value = value;
-}
+const { isPlaying, isWaiting, errorMessage, volume, setVolume, resume, pause, toggle, listeners } =
+	usePlayer(audio);
 
 const mainStore = useMainStore();
 useMediaSession(isPlaying, {
-	play: () => updatePlayback(false),
-	pause: () => updatePlayback(true),
+	play: resume,
+	pause,
 	previous: () => mainStore.selectAdjacentChannel(-1),
 	next: () => mainStore.selectAdjacentChannel(1),
 });
-
-const eventListeners = {
-	loadstart() {
-		isPlaying.value = false;
-		isWaiting.value = true;
-		errorMessage.value = '';
-		pausedByUser = false;
-	},
-
-	async canplay() {
-		isWaiting.value = false;
-		if (!pausedByUser && audio.value?.paused) await play();
-	},
-
-	playing() {
-		isWaiting.value = false;
-	},
-
-	play() {
-		isPlaying.value = true;
-	},
-
-	pause() {
-		isPlaying.value = false;
-	},
-
-	waiting() {
-		isWaiting.value = true;
-	},
-
-	ended() {
-		isPlaying.value = false;
-		isWaiting.value = false;
-	},
-
-	error(event: Event) {
-		isPlaying.value = false;
-		isWaiting.value = false;
-		const code = (event.target as HTMLAudioElement).error?.code;
-		errorMessage.value = (code && mediaErrorMessages[code]) || 'Playback error';
-	},
-};
 </script>
 
 <template>
@@ -116,15 +29,15 @@ const eventListeners = {
 			:src="props.src"
 			autoplay
 			crossorigin="anonymous"
-			v-on="eventListeners"
+			v-on="listeners"
 		></audio>
 		<p v-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
 		<p v-else-if="isWaiting" class="status" role="status">Buffering…</p>
 		<AudioPlayerElementControls
 			:is-playing="isPlaying"
 			:volume="volume"
-			@update:playback="updatePlayback"
-			@update:volume="updateVolume"
+			@update:playback="toggle"
+			@update:volume="setVolume"
 		/>
 		<AudioPlayerElementVisualizer v-if="audio" :audio="audio" />
 	</div>

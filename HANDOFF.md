@@ -117,18 +117,24 @@ npm test                             # Vitest
 
 ### Приоритет 2: тесты (частично сделано)
 
-3. ✅ Подключён Vitest (`npm test`), 37 тестов: `src/api.test.ts` (парсинг `.pls`,
+3. ✅ Подключён Vitest (`npm test`), 62 теста: `src/api.test.ts` (парсинг `.pls`,
    `toTrustedHttpsUrl`, чужие/похожие хосты, кодирование `channelId`) и
    `src/stores/main-store.test.ts` (гонка A→B, abort, ошибка стрима, канал без
    плейлистов, повтор после ошибки, устаревший ответ опроса песен). Тест гонки
    нашёл реальный дефект (запоздавший ответ заменённого канала перезаписывал
    новый выбор): в `setCurrentChannel` добавлена проверка `signal.aborted`.
-   - Осталось: компонентные тесты (`@vue/test-utils`) для `AudioPlayerElement`.
+   - Также покрыты `usePlayer` (состояния, ошибки, намерение пользователя),
+     `media-session`, `layout-middleware`, кэш каналов, `selectAdjacentChannel`.
+   - Осталось: компонентные тесты (`@vue/test-utils` + jsdom/happy-dom).
 
 ### Приоритет 3: рефакторинг (по желанию)
 
-4. Вынести логику плеера в composable `usePlayer(audioRef)`; контролы не должны
-   ходить в store за списком каналов (передавать `onPrev`/`onNext` событиями).
+4. ✅ Логика `<audio>` вынесена в `src/composables/player.ts` (`usePlayer`: состояние
+   playing/buffering/error, учёт намерения пользователя, автоплей-политика,
+   громкость); `AudioPlayerElement.vue` стал тонкой оболочкой. Выбор
+   предыдущего/следующего канала уже в store (`selectAdjacentChannel`).
+   Контролы всё ещё берут `useMainStore()` для `selectAdjacentChannel` —
+   при желании передавать `onPrev`/`onNext` событиями.
 5. В store завести единый `status: 'idle' | 'loading' | 'error'`.
 6. ✅ Визуализатор переписан на TypeScript (`src/lib/audio-visualizer.ts`): убраны
    мёртвый код (`filterLP`/`filterHP`, `isAlpha`, `Sound.count`), опечатка
@@ -137,8 +143,8 @@ npm test                             # Vitest
    (`src/lib/audio-visualizer.test.ts`): SHA-256 координат совпадает с хешем
    исходной JS-версии. Проверено в Chromium на реальном синусе: холст
    рисуется, звук идёт через `AudioContext`.
-7. `src/router/layout-middleware.ts` избыточен для одного layout: типизировать
-   `RouteMeta` или подключить layout статически.
+7. ✅ `layout-middleware.ts`: `loadLayout` с `import.meta.glob`, типизированный
+   `RouteMeta` (`layout`, `layoutComponent`), `markRaw`, тест.
 8. ✅ `preconnect` к `api.somafm.com` и кэш списка каналов (stale-while-revalidate,
    `localStorage`, ключ `somafm-player:channels`, форма проверяется): при повторном
    визите список показывается сразу, свежий приходит в фоне; при ошибке сети
@@ -176,8 +182,7 @@ npm test                             # Vitest
 14. `vite.config.ts`: `base: '/'`, а скрипт `deploy` использует `gh-pages`.
     На GitHub Pages как project-сайте пути сломаются; на Vercel всё работает.
     CSP из `vercel.json` на `gh-pages` не применяется.
-15. В `AppImage.vue` ветка внешних картинок принимает и `http://` (CSP
-    `upgrade-insecure-requests` это компенсирует, но можно ограничить `https`).
+15. ✅ `AppImage`: внешние картинки всегда запрашиваются по `https`.
 16. Pull request из этой ветки в `main` ещё не создан.
 
 ## Структура проекта (для ориентира)
