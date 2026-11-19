@@ -119,6 +119,7 @@ const eventListeners = {
 			v-on="eventListeners"
 		></audio>
 		<p v-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
+		<p v-else-if="isWaiting" class="status" role="status">Buffering…</p>
 		<AudioPlayerElementControls
 			:is-playing="isPlaying"
 			:volume="volume"
@@ -130,11 +131,19 @@ const eventListeners = {
 </template>
 
 <style scoped lang="scss">
+.status,
 .error {
 	position: relative;
 	z-index: 1;
 	margin-bottom: 0.625rem;
 	text-align: center;
+}
+
+.error {
 	color: $color-tertiary;
+}
+
+.status {
+	color: $color-secondary;
 }
 </style>

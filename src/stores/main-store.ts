@@ -2,7 +2,32 @@ import { defineStore } from 'pinia';
 import { api } from '@/api.ts';
 import { type Channel } from '@/types.ts';
 
+const CHANNELS_CACHE_KEY = 'somafm-player:channels';
+
 let channelRequest: AbortController | undefined;
+
+function isChannel(value: unknown): value is Channel {
+	if (typeof value !== 'object' || value === null) return false;
+	const { id, title, playlists } = value as Partial<Channel>;
+	return typeof id === 'string' && typeof title === 'string' && Array.isArray(playlists);
+}
+
+function readCachedChannels(): Channel[] {
+	try {
+		const data: unknown = JSON.parse(localStorage.getItem(CHANNELS_CACHE_KEY) ?? '[]');
+		return Array.isArray(data) ? data.filter((item) => isChannel(item)) : [];
+	} catch {
+		return [];
+	}
+}
+
+function writeCachedChannels(channels: Channel[]) {
+	try {
+		localStorage.setItem(CHANNELS_CACHE_KEY, JSON.stringify(channels));
+	} catch {
+		// Storage is full or unavailable (private mode): the cache is only an optimization.
+	}
+}
 
 function getErrorMessage(error: unknown) {
 	return error instanceof Error ? error.message : String(error);
@@ -23,12 +48,27 @@ export const useMainStore = defineStore('main-store', {
 	}),
 
 	actions: {
+		/**
+		 * Stale-while-revalidate: with a cached list the UI is ready immediately and the fresh
+		 * list replaces it in the background; without a cache this waits for the network.
+		 */
 		async loadChannels() {
 			this.channelsError = '';
+			const cached = this.channels.length === 0 ? readCachedChannels() : [];
+			if (cached.length > 0) this.channels = cached;
+
+			const refresh = this.refreshChannels();
+			if (cached.length === 0) await refresh;
+		},
+
+		async refreshChannels() {
 			try {
-				this.channels = await api.getChannels();
+				const channels = await api.getChannels();
+				this.channels = channels;
+				writeCachedChannels(channels);
 			} catch (error) {
-				this.channelsError = getErrorMessage(error);
+				// A stale list is better than an error screen.
+				if (this.channels.length === 0) this.channelsError = getErrorMessage(error);
 			}
 		},
 

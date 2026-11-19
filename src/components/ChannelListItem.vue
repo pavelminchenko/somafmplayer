@@ -15,7 +15,7 @@ const setCurrentChannel = async () => {
 </script>
 
 <template>
-	<div
+	<li
 		:id="props.data.id"
 		class="channel-list-item"
 		:class="{ current: props.data.id === mainStore.currentChannel?.id }"
@@ -26,11 +26,16 @@ const setCurrentChannel = async () => {
 				<div class="title">{{ props.data.title }}</div>
 				<div class="genre">{{ props.data.genre }}</div>
 			</div>
-			<button type="button" class="channel-button" @click="setCurrentChannel">
+			<button
+				type="button"
+				class="channel-button"
+				:aria-current="props.data.id === mainStore.currentChannel?.id || undefined"
+				@click="setCurrentChannel"
+			>
 				Play {{ props.data.title }}
 			</button>
 		</div>
-	</div>
+	</li>
 </template>
 
 <style scoped lang="scss">

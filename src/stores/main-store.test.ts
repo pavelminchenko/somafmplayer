@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/unbound-method -- vi.mocked() members are assertion targets */
 import { createPinia, setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '@/api.ts';
 import { useMainStore } from '@/stores/main-store';
 import type { Channel } from '@/types';
@@ -206,7 +206,24 @@ describe('refreshCurrentSongs', () => {
 	});
 });
 
+const CACHE_KEY = 'somafm-player:channels';
+
+function stubStorage(initial: Record<string, string> = {}) {
+	const data = new Map(Object.entries(initial));
+	vi.stubGlobal('localStorage', {
+		getItem: (key: string) => data.get(key) ?? null,
+		setItem: (key: string, value: string) => {
+			data.set(key, value);
+		},
+	});
+	return data;
+}
+
 describe('loadChannels', () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
 	it('stores channels and clears the previous error on success', async () => {
 		const store = useMainStore();
 		mocked.getChannels.mockRejectedValueOnce(new Error('offline'));
@@ -217,6 +234,55 @@ describe('loadChannels', () => {
 		await store.loadChannels();
 		expect(store.channelsError).toBe('');
 		expect(store.channels).toHaveLength(1);
+	});
+
+	it('writes the fresh list to the cache', async () => {
+		const data = stubStorage();
+		mocked.getChannels.mockResolvedValueOnce([makeChannel('a')]);
+		await useMainStore().loadChannels();
+
+		expect(JSON.parse(data.get(CACHE_KEY) ?? '[]')).toHaveLength(1);
+	});
+
+	it('shows the cached list immediately and refreshes it in the background', async () => {
+		stubStorage({ [CACHE_KEY]: JSON.stringify([makeChannel('old')]) });
+		const network = deferred<Channel[]>();
+		mocked.getChannels.mockReturnValueOnce(network.promise);
+		const store = useMainStore();
+
+		await store.loadChannels(); // resolves without waiting for the network
+
+		expect(store.channels.map(({ id }) => id)).toEqual(['old']);
+
+		network.resolve([makeChannel('fresh')]);
+		await vi.waitFor(() => {
+			expect(store.channels.map(({ id }) => id)).toEqual(['fresh']);
+		});
+	});
+
+	it('keeps the cached list and shows no error when the refresh fails', async () => {
+		stubStorage({ [CACHE_KEY]: JSON.stringify([makeChannel('old')]) });
+		mocked.getChannels.mockRejectedValueOnce(new Error('offline'));
+		const store = useMainStore();
+
+		await store.loadChannels();
+		await vi.waitFor(() => {
+			expect(mocked.getChannels).toHaveBeenCalled();
+		});
+
+		expect(store.channels.map(({ id }) => id)).toEqual(['old']);
+		expect(store.channelsError).toBe('');
+	});
+
+	it('ignores a corrupted or malformed cache', async () => {
+		stubStorage({ [CACHE_KEY]: JSON.stringify([{ nope: true }, 42]) });
+		mocked.getChannels.mockRejectedValueOnce(new Error('offline'));
+		const store = useMainStore();
+
+		await store.loadChannels();
+
+		expect(store.channels).toEqual([]);
+		expect(store.channelsError).toBe('offline');
 	});
 });
 

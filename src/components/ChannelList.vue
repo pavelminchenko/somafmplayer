@@ -13,9 +13,9 @@ const mainStore = useMainStore();
 
 <template>
 	<AppContainer class="channel-list" :class="{ 'channels-open': mainStore.mobileChannelsOpen }">
-		<div class="channels">
+		<ul class="channels">
 			<ChannelListItem v-for="channel in props.data" :key="channel.id" :data="channel" />
-		</div>
+		</ul>
 	</AppContainer>
 </template>
 

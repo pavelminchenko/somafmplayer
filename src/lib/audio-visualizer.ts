@@ -310,8 +310,10 @@ class Visualizer {
 	tick = 0;
 
 	private readonly sound: Sound;
-	private width = 0;
-	private height = 0;
+	// The picture is drawn in a fixed logical space (radius 350 etc.) and scaled to the bitmap,
+	// so the bitmap can match the real on-screen pixels instead of always being 1500x1500.
+	private logicalSize = 0;
+	private bitmapSize = 0;
 
 	constructor(
 		audio: HTMLAudioElement,
@@ -325,11 +327,12 @@ class Visualizer {
 		this.sound.init();
 	}
 
-	setSize(width: number, height: number) {
-		this.width = width;
-		this.height = height;
-		this.canvas.width = width;
-		this.canvas.height = height;
+	/** `logicalSize`: drawing space; `bitmapSize`: canvas resolution in device pixels. */
+	setSize(logicalSize: number, bitmapSize = logicalSize) {
+		this.logicalSize = logicalSize;
+		this.bitmapSize = bitmapSize;
+		this.canvas.width = bitmapSize;
+		this.canvas.height = bitmapSize;
 	}
 
 	resume() {
@@ -345,8 +348,9 @@ class Visualizer {
 		const context = this.canvasContext;
 
 		context.save();
-		context.clearRect(0, 0, this.width, this.height);
-		context.translate(this.width / 2, this.height / 2);
+		context.clearRect(0, 0, this.bitmapSize, this.bitmapSize);
+		context.scale(this.bitmapSize / this.logicalSize, this.bitmapSize / this.logicalSize);
+		context.translate(this.logicalSize / 2, this.logicalSize / 2);
 		context.lineWidth = 3;
 
 		this.sound.update();
