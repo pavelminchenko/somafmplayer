@@ -117,23 +117,26 @@ npm test                             # Vitest
 
 ### Приоритет 2: тесты (частично сделано)
 
-3. ✅ Подключён Vitest (`npm test`), 21 тест: `src/api.test.ts` (парсинг `.pls`,
+3. ✅ Подключён Vitest (`npm test`), 25 тестов: `src/api.test.ts` (парсинг `.pls`,
    `toTrustedHttpsUrl`, чужие/похожие хосты, кодирование `channelId`) и
    `src/stores/main-store.test.ts` (гонка A→B, abort, ошибка стрима, канал без
    плейлистов, повтор после ошибки, устаревший ответ опроса песен). Тест гонки
    нашёл реальный дефект (запоздавший ответ заменённого канала перезаписывал
    новый выбор): в `setCurrentChannel` добавлена проверка `signal.aborted`.
-   - Осталось: тест визуализатора (сверка кольца буферов с эталоном) и
-     компонентные тесты (`@vue/test-utils`) для `AudioPlayerElement`.
+   - Осталось: компонентные тесты (`@vue/test-utils`) для `AudioPlayerElement`.
 
 ### Приоритет 3: рефакторинг (по желанию)
 
 4. Вынести логику плеера в composable `usePlayer(audioRef)`; контролы не должны
    ходить в store за списком каналов (передавать `onPrev`/`onNext` событиями).
 5. В store завести единый `status: 'idle' | 'loading' | 'error'`.
-6. Переписать `src/lib/audio-visualizer.js` на TypeScript, убрать мёртвый код
-   (`filterLP`/`filterHP`, `isAlpha`, `Sound.count`), исправить опечатку
-   `calcPolorCoord`, убрать `@ts-expect-error` и `eslint-disable`.
+6. ✅ Визуализатор переписан на TypeScript (`src/lib/audio-visualizer.ts`): убраны
+   мёртвый код (`filterLP`/`filterHP`, `isAlpha`, `Sound.count`), опечатка
+   `calcPolorCoord`, `@ts-expect-error` и `eslint-disable`; нет аллокаций на
+   каждую точку. Геометрия закреплена «золотым» тестом
+   (`src/lib/audio-visualizer.test.ts`): SHA-256 координат совпадает с хешем
+   исходной JS-версии. Проверено в Chromium на реальном синусе: холст
+   рисуется, звук идёт через `AudioContext`.
 7. `src/router/layout-middleware.ts` избыточен для одного layout: типизировать
    `RouteMeta` или подключить layout статически.
 8. Кэшировать `getChannels` (sessionStorage / stale-while-revalidate),

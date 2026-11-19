@@ -1,15 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue';
 import { useScreenSize } from '@/composables/screen-size';
-// @ts-expect-error audio-visualizer
 import { Visualizer } from '@/lib/audio-visualizer';
-
-interface VisualizerInstance {
-	/* eslint-disable-next-line no-unused-vars, no-shadow */
-	setSize: (width: number, height: number) => void;
-	resume: () => void;
-	destroy: () => void;
-}
 
 const props = defineProps<{
 	audio: HTMLAudioElement;
@@ -17,7 +9,7 @@ const props = defineProps<{
 
 const screenSize = useScreenSize();
 // shallowRef: the instance is a plain class and must not be wrapped in a deep reactive proxy.
-const visualizer = shallowRef<VisualizerInstance>();
+const visualizer = shallowRef<Visualizer>();
 const visualizerElement = shallowRef<HTMLCanvasElement>();
 const size = computed(() => (screenSize['max-width-sm'].value ? 1000 : 1500));
 
@@ -27,7 +19,7 @@ watch(size, (value) => visualizer.value?.setSize(value, value));
 
 onMounted(() => {
 	if (!visualizerElement.value) return;
-	visualizer.value = new Visualizer(props.audio, visualizerElement.value) as VisualizerInstance;
+	visualizer.value = new Visualizer(props.audio, visualizerElement.value);
 	visualizer.value.setSize(size.value, size.value);
 	// Browsers may keep the AudioContext suspended until the user starts playback.
 	props.audio.addEventListener('play', resumeContext);
