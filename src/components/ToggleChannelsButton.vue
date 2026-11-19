@@ -13,6 +13,7 @@ function toggleChannels() {
 		type="button"
 		class="toggle-channels-button"
 		:class="mainStore.mobileChannelsOpen ? 'icon-close' : 'icon-menu'"
+		:aria-expanded="mainStore.mobileChannelsOpen"
 		@click="toggleChannels"
 	>
 		Toggle channels

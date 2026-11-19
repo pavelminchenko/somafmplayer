@@ -9,6 +9,8 @@ const props = defineProps<{
 }>();
 
 const MIN_BITMAP_SIZE = 256;
+// Resizing reallocates the canvas, so follow the window in coarse steps.
+const BITMAP_STEP = 64;
 
 const screenSize = useScreenSize();
 // shallowRef: the instance is a plain class and must not be wrapped in a deep reactive proxy.
@@ -19,11 +21,11 @@ const size = computed(() => (screenSize['max-width-sm'] ? 1000 : 1500));
 // ... and the canvas resolution: real on-screen pixels, never more than the logical size.
 const { width: cssWidth } = useElementSize(visualizerElement);
 const { pixelRatio } = useDevicePixelRatio();
-const bitmapSize = computed(() =>
-	cssWidth.value > 0
-		? Math.min(size.value, Math.max(MIN_BITMAP_SIZE, Math.ceil(cssWidth.value * pixelRatio.value)))
-		: size.value,
-);
+const bitmapSize = computed(() => {
+	if (cssWidth.value <= 0) return size.value;
+	const pixels = Math.ceil((cssWidth.value * pixelRatio.value) / BITMAP_STEP) * BITMAP_STEP;
+	return Math.min(size.value, Math.max(MIN_BITMAP_SIZE, pixels));
+});
 
 const resumeContext = () => visualizer.value?.resume();
 

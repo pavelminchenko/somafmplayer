@@ -16,12 +16,12 @@ const setCurrentChannel = async () => {
 
 <template>
 	<li
-		:id="props.data.id"
 		class="channel-list-item"
 		:class="{ current: props.data.id === mainStore.currentChannel?.id }"
 	>
 		<div class="inner">
-			<AppImage :src="props.data.image" :alt="props.data.id" />
+			<!-- Decorative: the channel title is right next to it. -->
+			<AppImage :src="props.data.image" alt="" />
 			<div class="info">
 				<div class="title">{{ props.data.title }}</div>
 				<div class="genre">{{ props.data.genre }}</div>

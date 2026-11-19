@@ -5,7 +5,8 @@ import { api } from '@/api.ts';
 import { useMainStore } from '@/stores/main-store';
 import type { Channel } from '@/types';
 
-vi.mock('@/api.ts', () => ({
+vi.mock('@/api.ts', async (importOriginal) => ({
+	...(await importOriginal<typeof import('@/api.ts')>()),
 	api: { getChannels: vi.fn(), getChannelSongs: vi.fn(), getStreamUrl: vi.fn() },
 }));
 
@@ -147,6 +148,47 @@ describe('setCurrentChannel', () => {
 		expect(store.currentChannel).toBeNull();
 		expect(store.streamUrl).toBe('');
 		expect(mocked.getStreamUrl).not.toHaveBeenCalled();
+	});
+
+	it('cancels a pending switch when the user goes back to the playing channel', async () => {
+		mocked.getStreamUrl.mockResolvedValueOnce('https://ice1.somafm.com/a');
+		mocked.getChannelSongs.mockResolvedValue([]);
+		const store = useMainStore();
+		await store.setCurrentChannel(makeChannel('a'));
+
+		const gate = deferred<string>();
+		const signals: AbortSignal[] = [];
+		mocked.getStreamUrl.mockImplementationOnce((_url: string, signal?: AbortSignal) => {
+			if (signal) signals.push(signal);
+			return gate.promise;
+		});
+		const pendingB = store.setCurrentChannel(makeChannel('b'));
+		expect(store.channelLoading).toBe(true);
+
+		await store.setCurrentChannel(makeChannel('a')); // changed my mind
+		gate.resolve('https://ice1.somafm.com/b'); // B answers late
+		await pendingB;
+
+		expect(signals[0].aborted).toBe(true);
+		expect(store.currentChannel?.id).toBe('a');
+		expect(store.streamUrl).toBe('https://ice1.somafm.com/a');
+		expect(store.requestedChannelId).toBe('a');
+		expect(store.channelLoading).toBe(false);
+	});
+
+	it('ignores a repeated click on the channel that is already loading', async () => {
+		const gate = deferred<string>();
+		mocked.getStreamUrl.mockReturnValue(gate.promise);
+		mocked.getChannelSongs.mockResolvedValue([]);
+		const store = useMainStore();
+
+		const first = store.setCurrentChannel(makeChannel('a'));
+		await store.setCurrentChannel(makeChannel('a'));
+		gate.resolve('https://ice1.somafm.com/a');
+		await first;
+
+		expect(mocked.getStreamUrl).toHaveBeenCalledTimes(1);
+		expect(store.currentChannel?.id).toBe('a');
 	});
 
 	it('does nothing when the same channel is selected again', async () => {

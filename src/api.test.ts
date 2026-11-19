@@ -77,3 +77,38 @@ describe('api.getChannelSongs', () => {
 		await expect(api.getChannelSongs('x')).rejects.toThrow('status 503');
 	});
 });
+
+describe('api response validation', () => {
+	const channel = { id: 'a', title: 'A', playlists: [{ url: 'https://api.somafm.com/a.pls' }] };
+
+	it('keeps only well-formed channels', async () => {
+		respondWith(
+			JSON.stringify({
+				channels: [
+					channel,
+					{ id: 1, title: 'bad id', playlists: [] },
+					{ id: 'b', title: 'bad playlists', playlists: [{ nope: true }] },
+					null,
+					'text',
+				],
+			}),
+		);
+		await expect(api.getChannels()).resolves.toEqual([channel]);
+	});
+
+	it('rejects a channels response without a list', async () => {
+		respondWith(JSON.stringify({ error: 'x' }));
+		await expect(api.getChannels()).rejects.toThrow('Unexpected channels response');
+	});
+
+	it('keeps only well-formed songs', async () => {
+		const song = { title: 'T', artist: 'A', album: '', albumart: '', date: '' };
+		respondWith(JSON.stringify({ songs: [song, { title: 1 }, null] }));
+		await expect(api.getChannelSongs('a')).resolves.toEqual([song]);
+	});
+
+	it('rejects a songs response without a list', async () => {
+		respondWith(JSON.stringify({ songs: 'nope' }));
+		await expect(api.getChannelSongs('a')).rejects.toThrow('Unexpected songs response');
+	});
+});

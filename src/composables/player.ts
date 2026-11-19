@@ -12,6 +12,9 @@ const mediaErrorMessages: Partial<Record<number, string>> = {
 	[MEDIA_ERR_SRC_NOT_SUPPORTED]: 'The stream is unavailable or not supported',
 };
 
+// A live stream buffered this long ago is stale: resuming it would replay old audio (or stall).
+const STALE_AFTER_PAUSE_MS = 15000;
+
 /** Anything that is not a number in [0, 1] (e.g. a corrupted stored value) means full volume. */
 function normalizeVolume(value: number) {
 	return value >= 0 && value <= 1 ? value : 1;
@@ -37,6 +40,7 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>) {
 
 	// Set when the user pauses on purpose, so `canplay` doesn't resume playback behind their back.
 	let pausedByUser = false;
+	let pausedAt = 0;
 
 	async function play() {
 		if (!audio.value) return;
@@ -55,7 +59,16 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>) {
 
 	/** The user (or a media key) asked to play. */
 	async function resume() {
+		const element = audio.value;
+		if (!element) return;
+
+		// After a fatal error `play()` alone does nothing, and after a long pause the buffer is
+		// old: reload so the live stream restarts from "now".
+		const wasPausedLong = pausedAt > 0 && Date.now() - pausedAt > STALE_AFTER_PAUSE_MS;
+		if (element.error || wasPausedLong) element.load();
+
 		pausedByUser = false;
+		pausedAt = 0;
 		errorMessage.value = '';
 		await play();
 	}
@@ -63,6 +76,7 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>) {
 	/** The user (or a media key) asked to pause. */
 	function pause() {
 		pausedByUser = true;
+		pausedAt = Date.now();
 		audio.value?.pause();
 	}
 

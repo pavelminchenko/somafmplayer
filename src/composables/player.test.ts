@@ -9,6 +9,7 @@ function makeAudio(paused = true) {
 		error: null as { code: number } | null,
 		play: vi.fn(() => Promise.resolve()),
 		pause: vi.fn(),
+		load: vi.fn(),
 	};
 }
 
@@ -160,6 +161,55 @@ describe('usePlayer user intent', () => {
 		player.listeners.play();
 		await player.toggle(); // playing -> pause
 		expect(audio.pause).toHaveBeenCalledOnce();
+	});
+});
+
+describe('usePlayer live stream recovery', () => {
+	it('reloads the stream when resuming after a fatal media error', async () => {
+		const audio = makeAudio();
+		audio.error = { code: 2 };
+		const { player } = setup(audio);
+
+		await player.resume();
+
+		expect(audio.load).toHaveBeenCalledOnce();
+		expect(audio.play).toHaveBeenCalledOnce();
+	});
+
+	it('does not reload after a short pause', async () => {
+		vi.useFakeTimers();
+		const { audio, player } = setup();
+
+		player.pause();
+		vi.advanceTimersByTime(5000);
+		await player.resume();
+
+		expect(audio.load).not.toHaveBeenCalled();
+		expect(audio.play).toHaveBeenCalledOnce();
+		vi.useRealTimers();
+	});
+
+	it('reloads after a long pause so the live stream restarts from now', async () => {
+		vi.useFakeTimers();
+		const { audio, player } = setup();
+
+		player.pause();
+		vi.advanceTimersByTime(60000);
+		await player.resume();
+
+		expect(audio.load).toHaveBeenCalledOnce();
+		vi.useRealTimers();
+	});
+
+	it('does not reload when playback was merely blocked by autoplay policy', async () => {
+		const audio = makeAudio();
+		audio.play.mockRejectedValueOnce(domError('NotAllowedError'));
+		const { player } = setup(audio);
+		await player.listeners.canplay();
+
+		await player.resume();
+
+		expect(audio.load).not.toHaveBeenCalled();
 	});
 });
 

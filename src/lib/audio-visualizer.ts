@@ -7,6 +7,10 @@ const FREQUENCY_BINS = 1024; // AnalyserNode.fftSize (2048) / 2
 const POINTS_PER_SIDE = 120;
 const ELLIPSE_RATIO = 0.95;
 const STROKE_PADDING = 3;
+// Cap at ~60 fps: on 120/144 Hz displays the animation would run 2x faster and burn 2x CPU.
+const FRAME_INTERVAL_MS = 15;
+// Frames to keep drawing after a pause so the ring can settle, then the loop stops until `play`.
+const IDLE_FRAMES_BEFORE_STOP = 180;
 
 // Safari < 14.1 only ships the prefixed constructor.
 interface LegacyAudioWindow {
@@ -231,7 +235,10 @@ class Sound implements AnalyserHost {
 	private readonly analysers: Analyser[] = [];
 	private source?: MediaElementAudioSourceNode;
 	private frameId = 0;
+	private isRunning = false;
 	private isDestroyed = false;
+	private lastFrameTime = 0;
+	private idleFrames = 0;
 
 	constructor(
 		readonly visual: SoundVisual,
@@ -273,7 +280,8 @@ class Sound implements AnalyserHost {
 
 		this.resume();
 		this.isReady = true;
-		this.render();
+		this.audio.addEventListener('play', this.wake);
+		this.start();
 	}
 
 	update() {
@@ -290,19 +298,40 @@ class Sound implements AnalyserHost {
 
 	destroy() {
 		this.isDestroyed = true;
+		this.audio.removeEventListener('play', this.wake);
 		cancelAnimationFrame(this.frameId);
 		this.source?.disconnect();
 		for (const { analyser } of this.analysers) analyser.disconnect();
 		if (this.audioContext.state !== 'closed') this.audioContext.close().catch(ignoreError);
 	}
 
-	private render() {
-		if (this.isDestroyed) return;
-		this.visual.draw();
-		this.frameId = requestAnimationFrame(() => {
-			this.render();
-		});
+	/** Restarts the draw loop after it went idle on pause. */
+	private readonly wake = () => {
+		this.idleFrames = 0;
+		this.resume();
+		this.start();
+	};
+
+	private start() {
+		if (this.isRunning || this.isDestroyed) return;
+		this.isRunning = true;
+		this.frameId = requestAnimationFrame(this.render);
 	}
+
+	private readonly render = (time: number) => {
+		if (this.isDestroyed) return;
+		this.frameId = requestAnimationFrame(this.render);
+		if (time - this.lastFrameTime < FRAME_INTERVAL_MS) return;
+		this.lastFrameTime = time;
+
+		this.visual.draw();
+
+		this.idleFrames = this.audio.paused ? this.idleFrames + 1 : 0;
+		if (this.idleFrames > IDLE_FRAMES_BEFORE_STOP) {
+			cancelAnimationFrame(this.frameId);
+			this.isRunning = false;
+		}
+	};
 }
 
 class Visualizer {

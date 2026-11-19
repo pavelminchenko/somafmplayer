@@ -1,16 +1,10 @@
 import { defineStore } from 'pinia';
-import { api } from '@/api.ts';
+import { api, isChannel } from '@/api.ts';
 import { type Channel } from '@/types.ts';
 
 const CHANNELS_CACHE_KEY = 'somafm-player:channels';
 
 let channelRequest: AbortController | undefined;
-
-function isChannel(value: unknown): value is Channel {
-	if (typeof value !== 'object' || value === null) return false;
-	const { id, title, playlists } = value as Partial<Channel>;
-	return typeof id === 'string' && typeof title === 'string' && Array.isArray(playlists);
-}
 
 function readCachedChannels(): Channel[] {
 	try {
@@ -73,9 +67,18 @@ export const useMainStore = defineStore('main-store', {
 		},
 
 		async setCurrentChannel(channel: Channel) {
-			if (this.currentChannel?.id === channel.id && !this.channelError) return;
+			const isCurrent = this.currentChannel?.id === channel.id && !this.channelError;
+			// Already playing/loading this channel: nothing to do.
+			if (this.requestedChannelId === channel.id && (isCurrent || this.channelLoading)) return;
 
 			this.requestedChannelId = channel.id;
+			if (isCurrent) {
+				// Going back to the channel that is still playing: just cancel the pending switch.
+				channelRequest?.abort();
+				channelRequest = undefined;
+				this.channelLoading = false;
+				return;
+			}
 
 			// Cancel the previous request so a slow response can't overwrite a newer choice.
 			channelRequest?.abort();
