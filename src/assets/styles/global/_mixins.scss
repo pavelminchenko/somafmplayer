@@ -1,8 +1,9 @@
 @use 'sass:map';
+@use './media-queries' as mq;
 
 @mixin media($query) {
-	@if map.has-key($mq-list, $query) {
-		@media #{map.get($mq-list, $query)} {
+	@if map.has-key(mq.$mq-list, $query) {
+		@media #{map.get(mq.$mq-list, $query)} {
 			@content;
 		}
 	} @else {

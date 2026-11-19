@@ -1,6 +1,6 @@
-@import './reset';
-@import './fonts';
-@import './icons';
+@use './reset';
+@use './fonts';
+@use './icons';
 
 body {
 	font: 400 1rem / 1.2 $font-family;
@@ -28,6 +28,8 @@ body {
 		background: rgba(255 255 255 / 0.05);
 	}
 
+	/* Firefox-only scrollbar colour; there is no standard feature query for this. */
+	/* stylelint-disable-next-line at-rule-no-vendor-prefix */
 	@-moz-document url-prefix() {
 		* {
 			scrollbar-color: rgba(255 255 255 / 0.05) rgba(255 255 255 / 0.05);

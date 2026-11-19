@@ -44,10 +44,10 @@ export default defineConfig({
 		preprocessorOptions: {
 			scss: {
 				additionalData: `
-					@import '@/assets/styles/global/_variables.scss';
-					@import '@/assets/styles/global/_media-queries.scss';
-					@import '@/assets/styles/global/_functions.scss';
-					@import '@/assets/styles/global/_mixins.scss';
+					@use '@/assets/styles/global/variables' as *;
+					@use '@/assets/styles/global/media-queries' as *;
+					@use '@/assets/styles/global/functions' as *;
+					@use '@/assets/styles/global/mixins' as *;
 				`,
 			},
 		},
