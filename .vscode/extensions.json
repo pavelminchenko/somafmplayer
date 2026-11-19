@@ -5,7 +5,6 @@
 		"dbaeumer.vscode-eslint",
 		"esbenp.prettier-vscode",
 		"stylelint.vscode-stylelint",
-		"html-validate.vscode-html-validate",
 		"EditorConfig.EditorConfig",
 		"vivaxy.vscode-conventional-commits",
 		"cipchk.cssrem"

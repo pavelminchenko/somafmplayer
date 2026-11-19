@@ -3,7 +3,6 @@
 	"scss.validate": false,
 	"stylelint.validate": ["css", "scss", "vue"],
 	"stylelint.snippet": ["css", "scss", "postcss"],
-	"html-validate.validate": ["html", "vue", "vue-html"],
 	"eslint.validate": ["javascript", "typescript", "vue"],
 	"eslint.probe": ["javascript", "typescript", "vue"],
 	"editor.formatOnSave": false,

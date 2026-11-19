@@ -105,7 +105,7 @@ npm test                             # Vitest
    - Vite 5 → 7 (и `@vitejs/plugin-vue`, нужен Node ≥ 20.19);
    - `@typescript-eslint/*` 6 → 8;
    - `vue-tsc` 1 → 3, `vue-tsc-files`;
-   - `stylelint` и плагины, `html-validate`, `commitizen`,
+   - `stylelint` и плагины, `commitizen`,
      `npm-check-updates`, `npm-run-all2`, `sass`.
    Делать по одному, после каждого: `vue-tsc`, `eslint`, `stylelint`, `vite build`.
 
@@ -117,8 +117,9 @@ npm test                             # Vitest
    плейлистов, повтор после ошибки, устаревший ответ опроса песен). Тест гонки
    нашёл реальный дефект (запоздавший ответ заменённого канала перезаписывал
    новый выбор): в `setCurrentChannel` добавлена проверка `signal.aborted`.
-   - Vitest закреплён на `^1.6.1`: новее требуют Vite ≥ 6, а `html-validate@8.9`
-     допускает только `vitest ^0.34 || ^1`. После обновления Vite поднять Vitest.
+   - Vitest стоит на `^1.6.1` (из-за peer-зависимости удалённого теперь
+     `html-validate`). Ограничение снято: можно поднять до `^3.2` (поддерживает
+     Vite 5); `vitest` ≥ 5 требует Vite ≥ 6.
    - Осталось: тест визуализатора (сверка кольца буферов с эталоном) и
      компонентные тесты (`@vue/test-utils`) для `AudioPlayerElement`.
 

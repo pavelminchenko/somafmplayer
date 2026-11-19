@@ -1,8 +1,0 @@
-.git
-.husky
-.vscode
-dist
-eslint
-node_modules
-public
-stylelint

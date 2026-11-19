@@ -12,11 +12,10 @@
 		"build-only": "vite build",
 		"deploy": "gh-pages -d dist",
 		"type-check": "vue-tsc --build --force",
-		"html-validate": "html-validate \"**/*.{vue,html}\"",
 		"eslint": "eslint \"**/*.{vue,js,cjs,ts,cts}\" --fix",
 		"stylelint": "stylelint \"**/*.{vue,css,scss}\" --fix",
 		"prettier": "prettier \"**/*.{vue,html,js,cjs,ts,cts,json,css,scss}\" --list-different --write",
-		"lint": "npm run html-validate && npm run type-check && npm run eslint && npm run stylelint && npm run prettier",
+		"lint": "npm run type-check && npm run eslint && npm run stylelint && npm run prettier",
 		"prepare": "husky install",
 		"commitlint": "commitlint --edit",
 		"commit": "git-cz",
@@ -28,7 +27,6 @@
 		}
 	},
 	"lint-staged": {
-		"*.{vue,html}": "html-validate",
 		"*.{vue,js,cjs,ts,cts}": "eslint --fix",
 		"*.{vue,css,scss}": "stylelint --fix",
 		"*.{vue,html,js,cjs,ts,cts,json,css,scss}": "prettier --list-different --write"
@@ -62,8 +60,6 @@
 		"eslint-plugin-unicorn": "^50.0.1",
 		"eslint-plugin-vue": "^9.19.2",
 		"gh-pages": "^6.1.1",
-		"html-validate": "^8.9.0",
-		"html-validate-vue": "^6.0.4",
 		"husky": "^8.0.3",
 		"inquirer": "8.2.6",
 		"npm-check-updates": "^16.14.12",
