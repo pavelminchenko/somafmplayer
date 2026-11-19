@@ -69,17 +69,17 @@ onUnmounted(() => clearTimeout(preloaderTimer));
 	z-index: 30;
 	display: flex;
 	flex-direction: column;
-	gap: 1rem;
-	align-items: center;
 	justify-content: center;
+	align-items: center;
+	gap: 1rem;
 	color: $color-secondary-light-1;
 	background: color-mix(in hsl, $color-primary-dark-2 90%, transparent);
 
 	button {
 		padding: 0.5rem 1.5rem;
-		border: 0.0625rem solid currentcolor;
-		border-radius: $border-radius;
 		color: inherit;
+		border: 0.0625rem solid currentColor;
+		border-radius: $border-radius;
 		cursor: pointer;
 	}
 }
