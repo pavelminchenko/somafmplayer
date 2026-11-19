@@ -98,16 +98,20 @@ npm test                             # Vitest
 ### Приоритет 1: проверка и безопасность dev-окружения
 
 1. Ручная проверка с реальным SomaFM (см. выше).
-2. **53 уязвимости остались в dev-зависимостях** (33 high, 1 critical — `tar`,
-   17 moderate, 2 low). В продакшен-сборку не попадают, но касаются разработки
-   (особенно `vite` ≤ 6.4.3 и его dev-сервер). Лечатся только мажорными
-   обновлениями, которые могут сломать конфиги в `eslint/` и `stylelint/`:
-   - Vite 5 → 7 (и `@vitejs/plugin-vue`, нужен Node ≥ 20.19);
-   - `@typescript-eslint/*` 6 → 8;
-   - `vue-tsc` 1 → 3, `vue-tsc-files`;
-   - `stylelint` и плагины, `commitizen`,
-     `npm-check-updates`, `npm-run-all2`, `sass`.
-   Делать по одному, после каждого: `vue-tsc`, `eslint`, `stylelint`, `vite build`.
+2. ✅ Dev-зависимости обновлены, `npm audit` показывает **0 уязвимостей**
+   (было 53, из них 1 critical). Сделано: Vite 5→7, `@vitejs/plugin-vue` 6,
+   Vitest 1→5 (Vitest 1.x сам принёс 2 critical: `vitest`, `tinypool`),
+   `vue-tsc` 1→3 (1.x падал на TypeScript 5.9), `@typescript-eslint` 6→8,
+   `npm-check-updates` 23, `inquirer` 8.2.7, `@types/node` 22; `npm update`
+   в пределах semver. Удалены неиспользуемые `vue-tsc-files` и `npm-run-all2`
+   (`npm run build` теперь `type-check && build-only`, последовательно).
+   Sass `@import` заменён на `@use`; сгенерированный CSS побайтово тот же.
+   **Требуется Node `^22.12 || ^24 || >=26`** (Vitest 5 и Vite 7; для
+   `npm run ncu` нужен ≥ 22.22.2). Если Vercel собирает на Node 20 — сменить
+   версию Node в настройках проекта Vercel.
+   Остальные пакеты можно обновлять по желанию (`npm run ncu`): ESLint 8→10,
+   Stylelint 16→18, Pinia 2→3/4, vue-router 4→5, TypeScript 5.9→6/7 и др. —
+   это уже не про безопасность, а про актуальность.
 
 ### Приоритет 2: тесты (частично сделано)
 
@@ -117,9 +121,6 @@ npm test                             # Vitest
    плейлистов, повтор после ошибки, устаревший ответ опроса песен). Тест гонки
    нашёл реальный дефект (запоздавший ответ заменённого канала перезаписывал
    новый выбор): в `setCurrentChannel` добавлена проверка `signal.aborted`.
-   - Vitest стоит на `^1.6.1` (из-за peer-зависимости удалённого теперь
-     `html-validate`). Ограничение снято: можно поднять до `^3.2` (поддерживает
-     Vite 5); `vitest` ≥ 5 требует Vite ≥ 6.
    - Осталось: тест визуализатора (сверка кольца буферов с эталоном) и
      компонентные тесты (`@vue/test-utils`) для `AudioPlayerElement`.
 
@@ -144,12 +145,10 @@ npm test                             # Vitest
 
 ### Прочее
 
-13. **CRLF и Prettier.** В `.prettierrc` и `.editorconfig` указан
-    `endOfLine: crlf`, а в репозитории файлы с LF и нет `.gitattributes`,
-    поэтому ESLint/Stylelint выдают ~1900 предупреждений `Insert ␍`.
-    Нужно решить: перейти на LF (`endOfLine: lf` + `.gitattributes`) или
-    нормализовать файлы в CRLF. Файлы, которые менялись в сессии, форматировались
-    с `--end-of-line lf`.
+13. ✅ CRLF и Prettier: в `.prettierrc` стоит `endOfLine: auto` (репозиторий
+    хранится с LF, раньше требовался CRLF и выдавалось ~1900 предупреждений).
+    ESLint, Stylelint и Prettier теперь без замечаний (`.editorconfig` по-прежнему
+    говорит `crlf` — при желании привести к единому виду).
 14. `vite.config.ts`: `base: '/'`, а скрипт `deploy` использует `gh-pages`.
     На GitHub Pages как project-сайте пути сломаются; на Vercel всё работает.
     CSP из `vercel.json` на `gh-pages` не применяется.
