@@ -9,6 +9,8 @@
 
 ## Как продолжить на компьютере
 
+Нужен Node.js `^22.12 || ^24 || >=26` (проверка: `node -v`).
+
 ```bash
 git fetch origin claude/code-review-bugs-security-c78xhv
 git checkout claude/code-review-bugs-security-c78xhv
