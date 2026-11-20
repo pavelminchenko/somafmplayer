@@ -4,7 +4,7 @@ import { normalizeVolume, usePlayer } from '@/composables/player';
 import type { StreamTransport, TransportCallbacks } from '@/lib/stream-transport';
 
 const FADE_MS = 60;
-const FAILED = 'Unable to connect to the stream after 3 attempts';
+const FAILED = 'Unable to connect to the stream for a minute';
 
 function makeAudio(paused = true) {
 	return {
@@ -43,17 +43,25 @@ function startPlaying(player: ReturnType<typeof setup>['player']) {
 }
 
 /**
- * A stream that never delivers anything and raises no events, driven by the watchdog only.
- * Timeline: lost at 11 s -> reload at 12 s -> lost at 23 s -> reload at 25 s -> lost at 36 s ->
- * reload at 40 s -> lost at 51 s with no attempts left. `loadstart` is what the reload triggers.
+ * A stream that never delivers anything and raises no events, driven by the watchdog only: the
+ * connect timeout (10 s) notices, a retry reloads the stream (which is when a real element fires
+ * `loadstart`), and so on until the minute is over.
  */
-function exhaustWithoutEvents(player: ReturnType<typeof setup>['player']) {
+function exhaustWithoutEvents(
+	player: ReturnType<typeof setup>['player'],
+	audio: ReturnType<typeof makeAudio>,
+) {
 	player.listeners.loadstart();
-	for (const untilReload of [12000, 13000, 15000]) {
-		vi.advanceTimersByTime(untilReload);
-		player.listeners.loadstart();
+	let loads = audio.load.mock.calls.length;
+	let source = audio.src;
+	for (let second = 0; second < 300 && !player.errorMessage.value; second++) {
+		vi.advanceTimersByTime(1000);
+		if (audio.load.mock.calls.length !== loads || audio.src !== source) {
+			loads = audio.load.mock.calls.length;
+			source = audio.src;
+			player.listeners.loadstart(); // the reload started by a retry
+		}
 	}
-	vi.advanceTimersByTime(11000);
 }
 
 afterEach(() => {
@@ -104,13 +112,13 @@ describe('usePlayer status', () => {
 });
 
 describe('usePlayer automatic reconnect', () => {
-	it('shows the attempt, retries with backoff (1 s, 2 s, 4 s) and then gives up', () => {
+	it('shows the attempt and retries with backoff: 1 s, 2 s, 4 s, 8 s, then every 8 s', () => {
 		const { audio, player } = setupWithTimers();
 		startPlaying(player);
 
 		player.listeners.error();
 		expect(player.isPlaying.value).toBe(true);
-		expect(player.statusMessage.value).toBe('Connection lost. Reconnecting… (1 of 3)');
+		expect(player.statusMessage.value).toBe('Connection lost. Reconnecting… (attempt 1)');
 		vi.advanceTimersByTime(999);
 		expect(audio.load).not.toHaveBeenCalled();
 		vi.advanceTimersByTime(1);
@@ -118,26 +126,58 @@ describe('usePlayer automatic reconnect', () => {
 		expect(audio.play).toHaveBeenCalledTimes(1);
 		player.listeners.loadstart(); // our own reload
 
-		player.listeners.error();
-		expect(player.statusMessage.value).toBe('Connection lost. Reconnecting… (2 of 3)');
-		vi.advanceTimersByTime(1999);
-		expect(audio.load).toHaveBeenCalledTimes(1);
-		vi.advanceTimersByTime(1);
-		expect(audio.load).toHaveBeenCalledTimes(2);
-		player.listeners.loadstart();
+		const waits = [2000, 4000, 8000, 8000, 8000];
+		waits.forEach((wait, index) => {
+			player.listeners.error();
+			expect(player.statusMessage.value).toBe(
+				`Connection lost. Reconnecting… (attempt ${String(index + 2)})`,
+			);
+			vi.advanceTimersByTime(wait - 1);
+			expect(audio.load).toHaveBeenCalledTimes(index + 1);
+			vi.advanceTimersByTime(1);
+			expect(audio.load).toHaveBeenCalledTimes(index + 2);
+			player.listeners.loadstart();
+		});
+	});
 
-		player.listeners.error();
-		expect(player.statusMessage.value).toBe('Connection lost. Reconnecting… (3 of 3)');
-		vi.advanceTimersByTime(4000);
-		expect(audio.load).toHaveBeenCalledTimes(3);
-		player.listeners.loadstart();
+	it('keeps trying for a minute and only then gives up', () => {
+		const { audio, player } = setupWithTimers();
+		startPlaying(player);
 
-		player.listeners.error(); // the fourth failure: no more attempts
+		const lose = (reloaded = true) => {
+			player.listeners.error();
+			vi.advanceTimersByTime(8000);
+			if (reloaded) player.listeners.loadstart(); // a retry reloaded the stream
+		};
+		for (let round = 0; round < 8; round++) lose(); // the last one starts at 56 s: still within the minute
+		expect(player.errorMessage.value).toBe('');
+		expect(player.statusMessage.value).toContain('Reconnecting');
+
+		lose(false); // 64 s since the first loss: the minute is over, no retry is scheduled
 		expect(player.errorMessage.value).toContain(FAILED);
 		expect(player.statusMessage.value).toBe('');
 		expect(player.isPlaying.value).toBe(false); // the button offers Play again
-		vi.advanceTimersByTime(60000);
-		expect(audio.load).toHaveBeenCalledTimes(3);
+		const loads = audio.load.mock.calls.length;
+		vi.advanceTimersByTime(120_000);
+		expect(audio.load).toHaveBeenCalledTimes(loads); // no more attempts
+	});
+
+	it('a short outage is simply waited out', () => {
+		const { player } = setupWithTimers();
+		startPlaying(player);
+
+		player.listeners.error();
+		vi.advanceTimersByTime(1000);
+		player.listeners.loadstart();
+		player.listeners.error();
+		vi.advanceTimersByTime(2000);
+		player.listeners.loadstart();
+		player.listeners.playing(); // the server is back
+
+		expect(player.statusMessage.value).toBe('');
+		expect(player.errorMessage.value).toBe('');
+		player.listeners.error(); // a later drop gets a fresh minute
+		expect(player.statusMessage.value).toBe('Connection lost. Reconnecting… (attempt 1)');
 	});
 
 	it('reconnects when the server closes the stream (ended)', () => {
@@ -226,7 +266,7 @@ describe('usePlayer watchdog (connection drops that raise no event)', () => {
 		expect(player.statusMessage.value).toBe('');
 		vi.advanceTimersByTime(2000);
 
-		expect(player.statusMessage.value).toBe('Connection lost. Reconnecting… (1 of 3)');
+		expect(player.statusMessage.value).toBe('Connection lost. Reconnecting… (attempt 1)');
 		expect(player.isPlaying.value).toBe(true);
 	});
 
@@ -269,10 +309,10 @@ describe('usePlayer watchdog (connection drops that raise no event)', () => {
 		expect(player.statusMessage.value).toContain('Reconnecting');
 	});
 
-	it('shows the final message after three failed attempts without any error event', () => {
-		const { player } = setupWithTimers();
+	it('shows the final message after a minute of failed attempts without any error event', () => {
+		const { audio, player } = setupWithTimers();
 
-		exhaustWithoutEvents(player);
+		exhaustWithoutEvents(player, audio);
 
 		expect(player.errorMessage.value).toContain(FAILED);
 		expect(player.statusMessage.value).toBe('');
@@ -408,7 +448,7 @@ describe('usePlayer live stream recovery', () => {
 
 	it('reloads when resuming after the connection gave up', async () => {
 		const { audio, player } = setupWithTimers();
-		exhaustWithoutEvents(player);
+		exhaustWithoutEvents(player, audio);
 		expect(player.errorMessage.value).toContain(FAILED);
 		audio.load.mockClear();
 
@@ -576,16 +616,11 @@ describe('usePlayer mirror servers', () => {
 		expect(audio.load).toHaveBeenCalledOnce();
 	});
 
-	it('starts again from the primary server after every attempt failed', async () => {
+	it('starts again from the primary server after the minute of failed attempts', async () => {
 		const { audio, player } = withMirrors();
-		player.listeners.loadstart();
-		for (const untilReload of [12000, 13000, 15000]) {
-			vi.advanceTimersByTime(untilReload);
-			player.listeners.loadstart();
-		}
-		vi.advanceTimersByTime(11000);
+		exhaustWithoutEvents(player, audio);
 		expect(player.errorMessage.value).toContain(FAILED);
-		expect(audio.src).toBe(MIRRORS[3]);
+		expect(MIRRORS).toContain(audio.src); // some mirror, after many rotations
 
 		await player.resume();
 
@@ -856,7 +891,7 @@ describe('usePlayer MSE transport', () => {
 		transport.open.mockClear();
 
 		callbacks().onLost('network');
-		expect(player.statusMessage.value).toBe('Connection lost. Reconnecting… (1 of 3)');
+		expect(player.statusMessage.value).toBe('Connection lost. Reconnecting… (attempt 1)');
 		vi.advanceTimersByTime(1000);
 
 		expect(transport.close).not.toHaveBeenCalled(); // no fallback

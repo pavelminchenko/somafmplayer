@@ -1,34 +1,46 @@
 import { readonly, ref } from 'vue';
 
 interface ReconnectorOptions {
-	maxAttempts: number;
+	/** How long to keep trying, counted from the first failure after the stream was last healthy. */
+	budgetMs: number;
 	/** Delay before the first retry; it doubles with every attempt (1 s, 2 s, 4 s ...). */
 	baseDelayMs: number;
+	/** The delay stops growing here, so retries keep coming at a steady pace until the budget ends. */
+	maxDelayMs: number;
 }
 
-/** Counts reconnect attempts and schedules the next one with exponential backoff. */
+/**
+ * Schedules reconnect attempts with exponential backoff for a limited time. An outage the user
+ * would call short (a few seconds, or half a minute) is simply waited out; only a long one ends in
+ * `'exhausted'`.
+ */
 function createReconnector(options: ReconnectorOptions) {
 	const attempt = ref(0);
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	let startedAt = 0;
 
 	function cancel() {
 		clearTimeout(timer);
 		timer = undefined;
 	}
 
-	/** Starts over (a stream is healthy again, or a new stream begins). Also cancels a pending retry. */
+	/** Starts over (a stream is healthy again, or a new one begins). Also cancels a pending retry. */
 	function reset() {
 		cancel();
 		attempt.value = 0;
+		startedAt = 0;
 	}
 
 	/**
 	 * Schedules `run` after the backoff delay and counts the attempt. Returns `'exhausted'` (and
-	 * schedules nothing) once all attempts were used.
+	 * schedules nothing) once the time budget since the first failure is used up.
 	 */
 	function schedule(run: () => void): 'scheduled' | 'exhausted' {
-		if (attempt.value >= options.maxAttempts) return 'exhausted';
-		const delay = options.baseDelayMs * 2 ** attempt.value;
+		const now = Date.now();
+		if (attempt.value === 0) startedAt = now;
+		if (now - startedAt >= options.budgetMs) return 'exhausted';
+
+		const delay = Math.min(options.baseDelayMs * 2 ** attempt.value, options.maxDelayMs);
 		attempt.value++;
 		cancel();
 		timer = setTimeout(() => {
@@ -40,7 +52,6 @@ function createReconnector(options: ReconnectorOptions) {
 
 	return {
 		attempt: readonly(attempt),
-		maxAttempts: options.maxAttempts,
 		schedule,
 		cancel,
 		reset,

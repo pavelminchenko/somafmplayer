@@ -12,9 +12,11 @@ type Phase = 'idle' | 'connecting' | 'playing' | 'buffering' | 'reconnecting' | 
 const ACTIVE_PHASES = new Set<Phase>(['connecting', 'playing', 'buffering', 'reconnecting']);
 
 // Live streams drop now and then (a reset connection often raises no `error` event at all, the
-// element just stops advancing): retry a few times (1 s, 2 s, 4 s) before giving up.
-const MAX_RECONNECT_ATTEMPTS = 3;
+// element just stops advancing): keep retrying (1 s, 2 s, 4 s, 8 s, then every 8 s) for a minute
+// before giving up, so a short outage is simply waited out.
+const RECONNECT_BUDGET_MS = 60000;
 const RECONNECT_BASE_DELAY_MS = 1000;
+const RECONNECT_MAX_DELAY_MS = 8000;
 // No progress for this long while playing/buffering means the connection is gone.
 const STALL_TIMEOUT_MS = 6000;
 // ... and for this long while (re)connecting.
@@ -23,7 +25,7 @@ const CONNECT_TIMEOUT_MS = 10000;
 const STALE_AFTER_PAUSE_MS = 15000;
 
 const FAILED_MESSAGE =
-	'Unable to connect to the stream after 3 attempts. Check your connection and press Play to try again.';
+	'Unable to connect to the stream for a minute. Check your connection and press Play to try again.';
 
 /** Placeholder for the hooks that are wired once the state machine's functions exist. */
 const noop = () => {
@@ -59,8 +61,9 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: PlayerOptions =
 
 	const level = useLevelControl(audio);
 	const reconnector = createReconnector({
-		maxAttempts: MAX_RECONNECT_ATTEMPTS,
+		budgetMs: RECONNECT_BUDGET_MS,
 		baseDelayMs: RECONNECT_BASE_DELAY_MS,
+		maxDelayMs: RECONNECT_MAX_DELAY_MS,
 	});
 
 	// "Playing" from the user's point of view: sound is on the way, a click means "pause/cancel".
@@ -74,7 +77,7 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: PlayerOptions =
 				return 'Buffering…';
 			}
 			case 'reconnecting': {
-				return `Connection lost. Reconnecting… (${String(reconnector.attempt.value)} of ${String(MAX_RECONNECT_ATTEMPTS)})`;
+				return `Connection lost. Reconnecting… (attempt ${String(reconnector.attempt.value)})`;
 			}
 			default: {
 				return '';
