@@ -149,8 +149,11 @@ npm test                             # Vitest
    SomaFM не использует редиректы).
 3. `http://` порт: `http://host:8000/…` переписывается в `https://host:8000/…`;
    работает ли HTTPS на этом порту, нужно проверить на реальных стримах.
-4. Единый `status` в store вместо `channelLoading`/`channelError`; компонентные тесты;
-   судьба скрипта `deploy` (`gh-pages`).
+4. Единый `status` в store вместо `channelLoading`/`channelError`; судьба скрипта
+   `deploy` (`gh-pages`); тесты `AudioPlayerElement`/`Home` целиком.
+5. CI: `.github/workflows/ci.yml` (type-check, ESLint, Stylelint, Prettier, тесты,
+   сборка, `npm audit --audit-level=high` на Node 22). Локально то же:
+   `npm run lint:ci && npm test && npm run build-only`.
 
 PR #1 в `main` создавался по ошибке и закрыт; создавать заново, когда понадобится.
 
@@ -176,7 +179,7 @@ PR #1 в `main` создавался по ошибке и закрыт; созд
 
 ### Приоритет 2: тесты (частично сделано)
 
-3. ✅ Подключён Vitest (`npm test`), 78 тестов: `src/api.test.ts` (парсинг `.pls`,
+3. ✅ Подключён Vitest (`npm test`), 95 тестов: `src/api.test.ts` (парсинг `.pls`,
    `toTrustedHttpsUrl`, чужие/похожие хосты, кодирование `channelId`) и
    `src/stores/main-store.test.ts` (гонка A→B, abort, ошибка стрима, канал без
    плейлистов, повтор после ошибки, устаревший ответ опроса песен). Тест гонки
@@ -184,7 +187,10 @@ PR #1 в `main` создавался по ошибке и закрыт; созд
    новый выбор): в `setCurrentChannel` добавлена проверка `signal.aborted`.
    - Также покрыты `usePlayer` (состояния, ошибки, намерение пользователя),
      `media-session`, `layout-middleware`, кэш каналов, `selectAdjacentChannel`.
-   - Осталось: компонентные тесты (`@vue/test-utils` + jsdom/happy-dom).
+   - ✅ Компонентные тесты (`ChannelList`, `ChannelListItem`, `ToggleChannelsButton`,
+     `AudioPlayerElementControls`) на `happy-dom` с мини-маунтером `src/test/mount.ts`.
+     `@vue/test-utils` не используется намеренно: даже 2.4.11 тянет `js-beautify` с
+     уязвимыми зависимостями (`npm audit` ≠ 0).
 
 ### Приоритет 3: рефакторинг (по желанию)
 
