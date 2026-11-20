@@ -117,5 +117,5 @@ function createIcyDemuxer(metaint: number, handlers: IcyHandlers): IcyDemuxer {
 	return { push };
 }
 
-export { createIcyDemuxer, parseStreamTitle, splitArtistSong };
+export { createIcyDemuxer, MAX_METAINT, parseStreamTitle, splitArtistSong };
 export type { IcyDemuxer, IcyHandlers };

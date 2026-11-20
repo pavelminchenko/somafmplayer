@@ -41,6 +41,34 @@ function writeLastChannelId(id: string) {
 	}
 }
 
+const MAX_TITLE_LENGTH = 300;
+
+// [from, to] code point ranges that must not appear in a displayed title:
+// controls, zero-width and direction marks (U+200B..U+200F), bidi overrides (U+202A..U+202E),
+// bidi isolates (U+2066..U+2069) and the byte order mark (U+FEFF).
+const STRIPPED_RANGES: [number, number][] = [
+	[0, 31],
+	[127, 159],
+	[8203, 8207],
+	[8234, 8238],
+	[8294, 8297],
+	[65279, 65279],
+];
+
+function isStrippable(code: number) {
+	return STRIPPED_RANGES.some(([from, to]) => code >= from && code <= to);
+}
+
+/**
+ * A title from the stream is untrusted text: drop control and bidi-override characters (they can
+ * reorder what is displayed), squeeze whitespace and cap the length (the protocol allows 4 KB).
+ */
+function sanitizeTitle(raw: string) {
+	const visible = Array.from(raw, (char) => (isStrippable(char.codePointAt(0) ?? 0) ? ' ' : char));
+	const clean = visible.join('').split(/\s+/).filter(Boolean).join(' ');
+	return clean.length > MAX_TITLE_LENGTH ? `${clean.slice(0, MAX_TITLE_LENGTH - 1)}…` : clean;
+}
+
 function getErrorMessage(error: unknown) {
 	return error instanceof Error ? error.message : String(error);
 }
@@ -184,6 +212,11 @@ export const useMainStore = defineStore('main-store', {
 					this.channelLoading = false;
 				}
 			}
+		},
+
+		/** Stores the title read from the stream (sanitized); an empty string clears it. */
+		setLiveTitle(raw: string) {
+			this.liveTitle = sanitizeTitle(raw);
 		},
 
 		/** Switches to the previous (-1) or next (1) channel in list order. */

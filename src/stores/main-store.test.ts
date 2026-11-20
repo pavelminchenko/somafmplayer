@@ -566,3 +566,38 @@ describe('nowPlaying and liveTitle', () => {
 		expect(store.liveTitle).toBe('');
 	});
 });
+
+describe('setLiveTitle', () => {
+	it('stores a plain title as is', () => {
+		const store = useMainStore();
+		store.setLiveTitle('Artist - Song');
+		expect(store.liveTitle).toBe('Artist - Song');
+	});
+
+	it('removes control, zero-width and bidi-override characters', () => {
+		const store = useMainStore();
+		store.setLiveTitle('A\u0000r\u0007tist\u202E - \u2066Song\u2069\u200B!\uFEFF');
+		expect(store.liveTitle).toBe('A r tist - Song !');
+	});
+
+	it('squeezes whitespace and trims', () => {
+		const store = useMainStore();
+		store.setLiveTitle('  Artist \n\t  -   Song  ');
+		expect(store.liveTitle).toBe('Artist - Song');
+	});
+
+	it('caps the length (the protocol allows 4 KB)', () => {
+		const store = useMainStore();
+		store.setLiveTitle('x'.repeat(4000));
+		expect(store.liveTitle).toHaveLength(300);
+		expect(store.liveTitle.endsWith('…')).toBe(true);
+	});
+
+	it('keeps non-Latin text intact and clears on an empty string', () => {
+		const store = useMainStore();
+		store.setLiveTitle('Мумий Тролль - Владивосток 2000 🎧');
+		expect(store.liveTitle).toBe('Мумий Тролль - Владивосток 2000 🎧');
+		store.setLiveTitle('');
+		expect(store.liveTitle).toBe('');
+	});
+});

@@ -114,10 +114,12 @@ interface FakeServer {
 	feed: (bytes: Uint8Array) => void;
 	close: () => void;
 	fail: (error: Error) => void;
-	requests: { url: string; headers: Record<string, string> }[];
+	requests: { url: string; headers: Record<string, string>; cache?: RequestCache }[];
 }
 
-function fakeFetch(init: { status?: number; metaint?: number | null; reject?: Error } = {}) {
+function fakeFetch(
+	init: { status?: number; metaint?: number | string | null; reject?: Error } = {},
+) {
 	const notYet = () => {
 		throw new Error('the fake connection is not open yet');
 	};
@@ -128,7 +130,11 @@ function fakeFetch(init: { status?: number; metaint?: number | null; reject?: Er
 		requests: [],
 	};
 	const implementation = vi.fn((url: string, request?: RequestInit) => {
-		server.requests.push({ url, headers: (request?.headers ?? {}) as Record<string, string> });
+		server.requests.push({
+			url,
+			headers: (request?.headers ?? {}) as Record<string, string>,
+			cache: request?.cache,
+		});
 		if (init.reject) return Promise.reject(init.reject);
 		let controller!: ReadableStreamDefaultController<Uint8Array>;
 		const body = new ReadableStream<Uint8Array>({
@@ -269,7 +275,7 @@ describe('startMseStream setup', () => {
 		await settle(0);
 
 		expect(audio.src).toBe('blob:fake-0');
-		expect(server.requests).toEqual([
+		expect(server.requests).toMatchObject([
 			{ url: 'https://ice4.somafm.com/deepspaceone-128-mp3', headers: { 'Icy-MetaData': '1' } },
 		]);
 	});
@@ -371,6 +377,59 @@ describe('startMseStream audio and titles', () => {
 		await settle();
 
 		expect(lostReasons).toEqual(['network']);
+	});
+});
+
+describe('startMseStream hardening', () => {
+	it.each([['0'], ['abc'], ['']])(
+		'plays icy-metaint "%s" as pure audio (no metadata)',
+		async (value) => {
+			const { server, buffer, titles, lostReasons } = setup({
+				metaint: value === '' ? null : value,
+			});
+			await settle(0);
+
+			server.feed(new Uint8Array(BYTES_PER_SECOND).fill(7));
+			await settle();
+
+			expect(buffer().audioBytes).toHaveLength(BYTES_PER_SECOND);
+			expect(titles).toEqual([]);
+			expect(lostReasons).toEqual([]);
+		},
+	);
+
+	it('refuses an impossible icy-metaint instead of corrupting the audio', async () => {
+		const { lostReasons, buffer } = setup({ metaint: 99_999_999 });
+		await settle(0);
+		expect(lostReasons).toEqual(['decode']);
+		expect(buffer().appended).toHaveLength(0);
+	});
+
+	it('reports `decode` once when the element lets go of the MediaSource', async () => {
+		const { lostReasons, stream } = setup();
+		await settle(0);
+
+		FakeMediaSource.instances[0].dispatchEvent(new Event('sourceclose'));
+		FakeMediaSource.instances[0].dispatchEvent(new Event('sourceclose'));
+
+		expect(lostReasons).toEqual(['decode']);
+		stream.stop();
+	});
+
+	it('does not report the MediaSource closing after stop()', async () => {
+		const { lostReasons, stream } = setup();
+		await settle(0);
+
+		stream.stop();
+		FakeMediaSource.instances[0].dispatchEvent(new Event('sourceclose'));
+
+		expect(lostReasons).toEqual([]);
+	});
+
+	it('never lets the HTTP cache serve a live stream', async () => {
+		const { server } = setup();
+		await settle(0);
+		expect(server.requests[0].cache).toBe('no-store');
 	});
 });
 

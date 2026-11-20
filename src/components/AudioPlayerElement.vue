@@ -32,7 +32,7 @@ const {
 watch(
 	liveTitle,
 	(title) => {
-		mainStore.liveTitle = title;
+		mainStore.setLiveTitle(title);
 	},
 	{ immediate: true },
 );

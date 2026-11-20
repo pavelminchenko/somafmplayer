@@ -9,7 +9,7 @@
  * back-pressure, buffer trimming, live-edge resync and an idle disconnect on pause.
  */
 
-import { createIcyDemuxer } from '@/lib/icy-demuxer';
+import { createIcyDemuxer, MAX_METAINT } from '@/lib/icy-demuxer';
 
 const MIME_TYPE = 'audio/mpeg';
 
@@ -329,6 +329,11 @@ function startMseStream(
 			lost('unsupported');
 			return;
 		}
+		// If the element lets go of the MediaSource, nothing can be played any more: report it instead
+		// of holding the connection open with a reader that waits for room forever.
+		mediaSource.addEventListener('sourceclose', () => {
+			lost('decode', 'MediaSource closed');
+		});
 		sourceBuffer.addEventListener('updateend', onUpdateEnd);
 		sourceBuffer.addEventListener('error', () => {
 			lost('decode', 'SourceBuffer error');
@@ -343,6 +348,7 @@ function startMseStream(
 		try {
 			const response = await fetchImpl(url, {
 				headers: { 'Icy-MetaData': '1' },
+				cache: 'no-store', // a live stream must never come from (or go to) the HTTP cache
 				signal: abort.signal,
 			});
 			if (!response.ok) {
@@ -354,10 +360,16 @@ function startMseStream(
 				return;
 			}
 			const metaint = Number.parseInt(response.headers.get('icy-metaint') ?? '');
-			// Without metadata the stream is still playable: everything is audio.
-			push = Number.isFinite(metaint)
-				? createIcyDemuxer(metaint, { onAudio: addAudio, onTitle: addTitle }).push
-				: addAudio;
+			// Missing, `0` or unparsable means the server sends no metadata: everything is audio.
+			// A value that cannot be real would misalign audio and metadata, which corrupts the sound.
+			if (Number.isInteger(metaint) && metaint > MAX_METAINT) {
+				lost('decode', `invalid icy-metaint ${String(metaint)}`);
+				return;
+			}
+			push =
+				Number.isInteger(metaint) && metaint > 0
+					? createIcyDemuxer(metaint, { onAudio: addAudio, onTitle: addTitle }).push
+					: addAudio;
 			reader = response.body.getReader();
 		} catch (error) {
 			if (!abort.signal.aborted)

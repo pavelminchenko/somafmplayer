@@ -296,7 +296,10 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: PlayerOptions =
 		liveTitle.value = '';
 		if (!currentSource) return;
 		if (pausedByUser) {
+			// Paused: only point the element at the real URL (without starting it), so that resuming
+			// reloads that instead of the dead MediaSource.
 			reloadOnResume = true;
+			transport.open(currentSource, false);
 			return;
 		}
 		isFallingBack = true;

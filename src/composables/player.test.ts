@@ -791,6 +791,28 @@ describe('usePlayer MSE transport', () => {
 		expect(audio.src).toBe(MIRRORS[1]); // next mirror, through the element
 	});
 
+	it('prepares the element when MSE fails while the user has paused, and reloads on resume', async () => {
+		const { audio, player, callbacks } = setupMse();
+		startPlaying(player);
+		player.pause();
+		vi.advanceTimersByTime(100);
+
+		callbacks().onLost('decode'); // the stream died while paused (MSE had played, so no fallback)
+		expect(audio.src).toBe(''); // the element is not touched by a normal loss
+
+		// A channel on which MSE never worked, paused before it produced sound:
+		const second = setupMse();
+		second.player.listeners.loadstart();
+		second.player.pause();
+		second.callbacks().onLost('decode');
+
+		expect(second.audio.src).toBe(MIRRORS[0]); // the real URL is attached, not the dead blob
+		expect(second.audio.autoplay).toBe(false);
+		await second.player.resume();
+		expect(second.audio.load).toHaveBeenCalledOnce();
+		expect(player.isPlaying.value).toBe(false);
+	});
+
 	it('falls back for the failing channel only: the next channel tries MSE again', async () => {
 		const { audio, player, callbacks, created, sources } = setupMse();
 		player.listeners.loadstart();
