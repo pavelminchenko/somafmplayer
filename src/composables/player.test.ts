@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { effectScope, nextTick, ref } from 'vue';
+import { afterEach, describe, expect, it, type Mock, vi } from 'vitest';
+import { effectScope, nextTick, type Ref, ref } from 'vue';
 import { normalizeVolume, usePlayer } from '@/composables/player';
+import type { StreamTransport, TransportCallbacks } from '@/lib/stream-transport';
 
 const FADE_MS = 60;
 const FAILED = 'Unable to connect to the stream after 3 attempts';
@@ -637,6 +638,210 @@ describe('usePlayer mirror servers', () => {
 		await vi.advanceTimersByTimeAsync(500);
 
 		expect(audio.src).toBe('https://ice2.somafm.com/b');
+	});
+});
+
+async function switchChannel(sources: Ref<string[]>, urls: string[]) {
+	sources.value = urls;
+	await nextTick();
+	await vi.advanceTimersByTimeAsync(100);
+}
+
+describe('usePlayer MSE transport', () => {
+	interface FakeTransport extends StreamTransport {
+		open: Mock<StreamTransport['open']>;
+		reopen: Mock<StreamTransport['reopen']>;
+		start: Mock<StreamTransport['start']>;
+		close: Mock<StreamTransport['close']>;
+	}
+
+	function setupMse(options: Parameters<typeof usePlayer>[1] = {}) {
+		let callbacks!: TransportCallbacks;
+		const created: FakeTransport[] = [];
+		const sources = ref([...MIRRORS]);
+		const audio = makeAudio();
+		const result = setupWithTimers(audio, {
+			sources,
+			transport: 'mse',
+			createMseTransport: (given) => {
+				callbacks = given;
+				const fake: FakeTransport = {
+					kind: 'mse',
+					open: vi.fn(),
+					reopen: vi.fn(),
+					start: vi.fn(),
+					close: vi.fn(),
+				};
+				created.push(fake);
+				return fake;
+			},
+			...options,
+		});
+		return {
+			...result,
+			audio,
+			created,
+			/** The MSE transport currently in use (the first one unless the player re-created it). */
+			get transport() {
+				// eslint-disable-next-line unicorn/prefer-at -- the TypeScript lib target has no Array#at
+				return created[created.length - 1];
+			},
+			sources,
+			callbacks: () => callbacks,
+		};
+	}
+
+	it('opens the first mirror through the transport', () => {
+		const { transport } = setupMse();
+		expect(transport.open).toHaveBeenCalledWith(MIRRORS[0], true);
+	});
+
+	it('only prepares a restored channel and connects when the user presses Play', async () => {
+		const { transport, player } = setupMse({ autoplay: ref(false) });
+		expect(transport.open).toHaveBeenCalledWith(MIRRORS[0], false);
+		expect(transport.start).not.toHaveBeenCalled();
+
+		player.listeners.loadstart();
+		await player.toggle();
+
+		expect(transport.start).toHaveBeenCalledOnce();
+	});
+
+	it('exposes the title read from the stream and clears it for a new channel', async () => {
+		const { player, callbacks, sources } = setupMse();
+
+		callbacks().onTitle('Artist - Song');
+		expect(player.liveTitle.value).toBe('Artist - Song');
+
+		sources.value = ['https://ice2.somafm.com/other'];
+		await nextTick();
+		await vi.advanceTimersByTimeAsync(100);
+		expect(player.liveTitle.value).toBe('');
+	});
+
+	it('falls back to the plain element when MSE fails before any sound', () => {
+		const { audio, player, transport, callbacks } = setupMse();
+		player.listeners.loadstart();
+
+		callbacks().onLost('unsupported');
+
+		expect(transport.close).toHaveBeenCalledOnce();
+		expect(audio.src).toBe(MIRRORS[0]); // the element plays the same URL itself now
+		expect(audio.autoplay).toBe(true);
+		expect(player.statusMessage.value).toBe('Connecting…'); // not an error, not a counted attempt
+		expect(player.errorMessage.value).toBe('');
+	});
+
+	it('falls back for any failure while MSE has never produced sound (e.g. CORS)', () => {
+		const { audio, player, callbacks } = setupMse();
+		player.listeners.loadstart();
+
+		callbacks().onLost('network');
+
+		expect(audio.src).toBe(MIRRORS[0]);
+	});
+
+	it('after the fallback the element transport handles reconnects as before', () => {
+		const { audio, player, callbacks } = setupMse();
+		player.listeners.loadstart();
+		callbacks().onLost('network');
+		player.listeners.loadstart(); // the element started loading
+		player.listeners.error();
+		vi.advanceTimersByTime(1000);
+
+		expect(audio.src).toBe(MIRRORS[1]); // next mirror, through the element
+	});
+
+	it('falls back for the failing channel only: the next channel tries MSE again', async () => {
+		const { audio, player, callbacks, created, sources } = setupMse();
+		player.listeners.loadstart();
+		callbacks().onLost('network'); // MSE fails on this channel
+		expect(audio.src).toBe(MIRRORS[0]); // played by the element
+
+		await switchChannel(sources, ['https://ice2.somafm.com/other']);
+
+		expect(created).toHaveLength(2); // a fresh MSE transport
+		expect(created[1].open).toHaveBeenCalledWith('https://ice2.somafm.com/other', true);
+	});
+
+	it('stops trying MSE for good when it is unsupported', async () => {
+		const { audio, player, callbacks, created, sources } = setupMse();
+		player.listeners.loadstart();
+		callbacks().onLost('unsupported');
+
+		await switchChannel(sources, ['https://ice2.somafm.com/other']);
+
+		expect(created).toHaveLength(1);
+		expect(audio.src).toBe('https://ice2.somafm.com/other'); // the element from now on
+	});
+
+	it('a retry pending for the old channel does not fire on the new one', async () => {
+		const { audio, player, transport, callbacks, sources } = setupMse();
+		startPlaying(player);
+		callbacks().onLost('network'); // a retry is scheduled in 1 s
+		transport.open.mockClear();
+
+		await switchChannel(sources, ['https://ice2.somafm.com/other']);
+		vi.advanceTimersByTime(10000);
+
+		expect(transport.open.mock.calls).toEqual([['https://ice2.somafm.com/other', true]]);
+		expect(audio.load).not.toHaveBeenCalled();
+		expect(player.statusMessage.value).toBe('Connecting…'); // not "Reconnecting" the old channel
+	});
+
+	it('uses the normal reconnect (next mirror) once MSE has worked', () => {
+		const { player, transport, callbacks } = setupMse();
+		startPlaying(player);
+		transport.open.mockClear();
+
+		callbacks().onLost('network');
+		expect(player.statusMessage.value).toBe('Connection lost. Reconnecting… (1 of 3)');
+		vi.advanceTimersByTime(1000);
+
+		expect(transport.close).not.toHaveBeenCalled(); // no fallback
+		expect(transport.open).toHaveBeenCalledWith(MIRRORS[1], true);
+	});
+
+	it('reconnects the same mirror through reopen() after a long pause', async () => {
+		const { player, transport } = setupMse();
+		startPlaying(player);
+
+		player.pause();
+		vi.advanceTimersByTime(60000);
+		await player.resume();
+
+		expect(transport.reopen).toHaveBeenCalledOnce();
+	});
+
+	it('reconnects on resume when the transport dropped the connection during a pause', async () => {
+		const { player, transport, callbacks } = setupMse();
+		startPlaying(player);
+		player.pause();
+
+		callbacks().onSuspended();
+		await player.resume();
+
+		expect(transport.reopen).toHaveBeenCalledOnce();
+	});
+
+	it('reconnects on resume when the stream died while the user had paused', async () => {
+		const { player, transport, callbacks } = setupMse();
+		startPlaying(player);
+		player.pause();
+		const attemptsBefore = player.statusMessage.value;
+
+		callbacks().onLost('ended');
+		vi.advanceTimersByTime(10000);
+		expect(player.statusMessage.value).toBe(attemptsBefore); // no reconnect while paused
+		await player.resume();
+
+		expect(transport.reopen).toHaveBeenCalledOnce();
+	});
+
+	it('releases the connection when the player is disposed', () => {
+		const { transport, scope } = setupMse();
+		scope.stop();
+		expect(transport.close).toHaveBeenCalledOnce();
 	});
 });
 

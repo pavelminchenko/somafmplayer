@@ -237,7 +237,9 @@ npm test                             # Vitest
 плеер на MSE с откатом на `<audio>`; план в `docs/icy-mse-plan.md`; браузеры: Chrome и Firefox (iPhone
 необязателен); опрос API при живом ICY отключать. Этап 0 (спайк) в Chrome пройден (17 мин, без ошибок), Firefox ждёт проверки. Сделаны
 этап 1 (`src/lib/icy-demuxer.ts`) и этап 2 (`src/lib/mse-stream.ts`), оба с тестами и пока не подключены
-к приложению; дальше этап 3 (транспорт в `usePlayer`, MSE за флагом, откат на `<audio>`).
+к приложению; этап 3 тоже сделан (транспорт в `usePlayer`: `?transport=mse` включает MSE, по умолчанию прежний
+`<audio src>`, откат per-channel); дальше этап 4 (показ названия из потока `liveTitle`, отключение опроса API
+при живом ICY).
 
 **Как проверить ICY у себя:** `npm run dev`, открыть
 `http://localhost:3000/tools/icy-probe.html`, нажать «Проверить». Страница читает поток

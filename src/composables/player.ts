@@ -10,6 +10,15 @@ import {
 	watchEffect,
 } from 'vue';
 import { AudioOutput, FADE_MS } from '@/lib/audio-output';
+import type { LostReason } from '@/lib/mse-stream';
+import {
+	createElementTransport,
+	createMseTransport,
+	readTransportPreference,
+	type StreamTransport,
+	type TransportCallbacks,
+	type TransportKind,
+} from '@/lib/stream-transport';
 
 type Phase = 'idle' | 'connecting' | 'playing' | 'buffering' | 'reconnecting' | 'paused' | 'failed';
 
@@ -48,12 +57,18 @@ interface PlayerOptions {
 	sources?: Ref<string[]>;
 	/** False to prepare a stream without starting it (e.g. a channel restored after a reload). */
 	autoplay?: Ref<boolean>;
+	/** How the stream reaches the element; defaults to the user's choice (`?transport=`) or `element`. */
+	transport?: TransportKind;
+	/** Replaces the MSE transport (tests). */
+	createMseTransport?: (callbacks: TransportCallbacks) => StreamTransport;
 }
 
 function usePlayer(audio: Ref<HTMLAudioElement | null>, options: PlayerOptions = {}) {
 	const phase = ref<Phase>('idle');
 	const errorMessage = ref('');
 	const reconnectAttempt = ref(0);
+	// Track title read from the stream (MSE transport only), empty until the first one arrives.
+	const liveTitle = ref('');
 
 	// "Playing" from the user's point of view: sound is on the way, a click means "pause/cancel".
 	const isPlaying = computed(() => ACTIVE_PHASES.has(phase.value));
@@ -128,6 +143,35 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: PlayerOptions =
 	let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	// True while our own retry reloads the stream, so its `loadstart` keeps the attempt counter.
 	let isReconnecting = false;
+	// True while switching from the MSE transport to the plain element after MSE failed to start.
+	let isFallingBack = false;
+
+	// ---- transport: how the stream URL reaches the element ----
+	const getElement = () => audio.value;
+	let mseEverPlayed = false;
+	const transportCallbacks: TransportCallbacks = {
+		onTitle: (title) => {
+			liveTitle.value = title;
+		},
+		onLost: (reason) => {
+			// eslint-disable-next-line @typescript-eslint/no-use-before-define
+			handleTransportLost(reason);
+		},
+		onSuspended: () => {
+			// The connection was dropped during a long pause: resuming must reconnect.
+			reloadOnResume = true;
+		},
+	};
+	// What the user asked for. A channel where MSE fails falls back to the element for that channel
+	// only; MSE being unsupported altogether switches this for good.
+	let preferredKind: TransportKind = options.transport ?? readTransportPreference();
+	function createTransport(kind: TransportKind): StreamTransport {
+		return kind === 'mse'
+			? (options.createMseTransport?.(transportCallbacks) ??
+					createMseTransport(getElement, transportCallbacks))
+			: createElementTransport(getElement);
+	}
+	let transport = createTransport(preferredKind);
 
 	// ---- watchdog: the element's `currentTime` must keep advancing while we want sound ----
 	let watchdog: ReturnType<typeof setInterval> | undefined;
@@ -149,6 +193,7 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: PlayerOptions =
 		cancelReconnect();
 		cancelPendingPause();
 		stopWatchdog();
+		transport.close();
 		output.value?.destroy();
 	});
 
@@ -209,33 +254,63 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: PlayerOptions =
 	let mirrorIndex = 0;
 	let currentSource = '';
 
-	/** Points the element at `url`; assigning `src` starts loading, a same-URL reload needs `load()`. */
-	function setElementSource(element: HTMLAudioElement, url: string) {
+	/** Connects to `url`: a new URL opens a new connection, the same URL reconnects. */
+	function setSource(url: string, startNow = true) {
 		if (currentSource === url) {
-			element.load();
+			transport.reopen();
 			return;
 		}
 		currentSource = url;
-		element.src = url;
+		transport.open(url, startNow);
 	}
 
 	/** Restarts the stream, optionally on the next mirror (all of them serve the same channel). */
 	function reloadStream({ nextMirror }: { nextMirror: boolean }) {
-		const element = audio.value;
-		if (!element) return;
 		const urls = options.sources?.value ?? [];
 		if (urls.length === 0) {
-			element.load(); // no source management: reload whatever is set
+			transport.reopen(); // no source management: reload whatever is set
 			return;
 		}
 		if (nextMirror) mirrorIndex = (mirrorIndex + 1) % urls.length;
-		setElementSource(element, urls[mirrorIndex] ?? urls[0]);
+		setSource(urls[mirrorIndex] ?? urls[0]);
+	}
+
+	/** The transport reported that its connection is gone. */
+	function handleTransportLost(reason: LostReason) {
+		if (transport.kind === 'mse' && !mseEverPlayed) {
+			// MSE never produced sound for this channel (CORS, decoder, ...): use the proven path.
+			if (reason === 'unsupported') preferredKind = 'element'; // it will never work here
+			// eslint-disable-next-line @typescript-eslint/no-use-before-define
+			fallbackToElement();
+			return;
+		}
+		// eslint-disable-next-line @typescript-eslint/no-use-before-define
+		connectionLost();
+	}
+
+	/** Gives up on MSE for this player and plays the same URL through the element itself. */
+	function fallbackToElement() {
+		transport.close();
+		transport = createElementTransport(getElement);
+		if (!currentSource) return;
+		if (pausedByUser) {
+			reloadOnResume = true;
+			return;
+		}
+		isFallingBack = true;
+		transport.open(currentSource, true);
+		startWatchdog();
+		// eslint-disable-next-line @typescript-eslint/no-use-before-define
+		resumePlayback();
 	}
 
 	/** The stream died (error event, premature end or a stalled connection). */
 	function connectionLost() {
 		stopWatchdog();
-		if (pausedByUser) return;
+		if (pausedByUser) {
+			reloadOnResume = true; // the stream died while paused: resuming must reconnect
+			return;
+		}
 
 		if (reconnectAttempt.value >= MAX_RECONNECT_ATTEMPTS) {
 			phase.value = 'failed';
@@ -291,7 +366,15 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: PlayerOptions =
 		errorMessage.value = '';
 		phase.value = 'connecting';
 		startWatchdog();
+		transport.start(); // a restored channel did not connect until now
 		await play();
+	}
+
+	/** Plays without awaiting (the promise never rejects: play() handles its own errors). */
+	function resumePlayback() {
+		play().catch(() => {
+			/* handled inside play() */
+		});
 	}
 
 	/** The user (or a media key) asked to pause (or to cancel a connection attempt). */
@@ -339,6 +422,11 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: PlayerOptions =
 	const listeners = {
 		loadstart() {
 			pausedByUser = false;
+			if (isFallingBack) {
+				isFallingBack = false;
+				phase.value = 'connecting';
+				return;
+			}
 			if (isReconnecting) {
 				isReconnecting = false;
 				phase.value = 'reconnecting';
@@ -364,6 +452,7 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: PlayerOptions =
 
 		playing() {
 			setEnvelope(1); // fades in from silence (after a pause or a stream switch)
+			if (transport.kind === 'mse') mseEverPlayed = true;
 			phase.value = 'playing';
 			reconnectAttempt.value = 0;
 			errorMessage.value = '';
@@ -406,20 +495,35 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: PlayerOptions =
 		async ([element, urls]) => {
 			if (!element || !urls || urls.length === 0) return;
 			const token = ++sourceToken;
-			if (currentSource !== '') await duck();
+			if (currentSource !== '') {
+				// Switching channels: nothing of the old stream (pending retry, watchdog) may fire on the
+				// new one.
+				cancelReconnect();
+				stopWatchdog();
+				reconnectAttempt.value = 0;
+				errorMessage.value = '';
+				if (phase.value === 'reconnecting' || phase.value === 'failed') phase.value = 'connecting';
+				await duck();
+			}
 			if (token !== sourceToken) return; // a newer switch took over meanwhile
 
+			mseEverPlayed = false;
+			if (transport.kind !== preferredKind) {
+				transport.close();
+				transport = createTransport(preferredKind);
+			}
+
 			mirrorIndex = 0;
-			// Must be set before `src`: they decide whether loading starts and whether it autoplays.
-			element.autoplay = options.autoplay?.value ?? true;
-			element.preload = element.autoplay ? 'auto' : 'none';
-			setElementSource(element, urls[0]);
+			liveTitle.value = ''; // a new channel: the old title no longer applies
+			// A restored channel is only prepared (no connection) until the user presses Play.
+			setSource(urls[0], (options.autoplay?.value ?? true) || userStarted);
 		},
 		{ immediate: true },
 	);
 
 	return {
 		output,
+		liveTitle: readonly(liveTitle),
 		isPlaying,
 		statusMessage,
 		errorMessage: readonly(errorMessage),
