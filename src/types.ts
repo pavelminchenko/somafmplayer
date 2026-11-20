@@ -2,7 +2,7 @@ export interface Song {
 	title: string;
 	artist: string;
 	album: string;
-	albumart: string;
+	albumArt: string;
 	date: string;
 }
 

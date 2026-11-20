@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="ru">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Проверка ICY-метаданных SomaFM</title>
+		<style>
+			body {
+				max-width: 52rem;
+				margin: 2rem auto;
+				padding: 0 1rem;
+				font:
+					15px/1.5 system-ui,
+					sans-serif;
+			}
+			input[type='text'] {
+				width: 100%;
+				padding: 0.4rem;
+				font: inherit;
+			}
+			button {
+				padding: 0.4rem 1rem;
+				font: inherit;
+			}
+			pre {
+				overflow: auto;
+				padding: 0.75rem;
+				white-space: pre-wrap;
+				background: #f3f3f3;
+			}
+			.ok {
+				color: #0a7a2f;
+			}
+			.bad {
+				color: #b3261e;
+			}
+			.warn {
+				color: #946200;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>Проверка ICY-метаданных потока</h1>
+		<p>
+			Страница сама
+			<b>ничего не воспроизводит</b>
+			: она читает поток с заголовком
+			<code>Icy-MetaData: 1</code>
+			и ищет в нём названия треков. Так проверяется, можно ли получать название трека прямо из
+			потока (без опроса API). Запустите через
+			<code>npm run dev</code>
+			и откройте
+			<code>http://localhost:3000/tools/icy-probe.html</code>
+			.
+		</p>
+
+		<label for="url">Адрес потока (из .pls любого канала):</label>
+		<input id="url" type="text" value="https://ice4.somafm.com/deepspaceone-128-mp3" />
+		<p>
+			<label for="metaint">
+				icy-metaint вручную (только если заголовок не виден браузеру; обычно 16000):
+			</label>
+			<input id="metaint" type="text" placeholder="пусто = взять из заголовка" size="12" />
+		</p>
+		<p>
+			<button id="run" type="button">Проверить (до 40 с)</button>
+			<button id="stop" type="button" disabled>Остановить</button>
+		</p>
+
+		<h2>Итог</h2>
+		<div id="verdict">Ещё не запускали.</div>
+		<h2>Ход проверки</h2>
+		<pre id="log"></pre>
+		<h2>Возможности браузера для своего плеера</h2>
+		<pre id="caps"></pre>
+
+		<script>
+			const MAX_SECONDS = 40;
+			const $ = (id) => document.getElementById(id);
+			let controller;
+			let decided = false;
+
+			function log(line) {
+				$('log').textContent += line + '\n';
+			}
+
+			function verdict(kind, text, final = true) {
+				decided = final;
+				$('verdict').innerHTML = `<b class="${kind}">${text}</b>`;
+			}
+
+			/** Splits the interleaved stream: `metaint` audio bytes, 1 length byte (x16), metadata, repeat. */
+			function createParser(metaint, onMetadata) {
+				let state = 'audio';
+				let need = metaint;
+				let meta = [];
+				let audioBytes = 0;
+				return {
+					get audioBytes() {
+						return audioBytes;
+					},
+					feed(chunk) {
+						let i = 0;
+						while (i < chunk.length) {
+							if (state === 'audio') {
+								const n = Math.min(need, chunk.length - i);
+								i += n;
+								need -= n;
+								audioBytes += n;
+								if (need === 0) state = 'length';
+							} else if (state === 'length') {
+								const length = chunk[i++] * 16;
+								if (length === 0) {
+									onMetadata('');
+									state = 'audio';
+									need = metaint;
+								} else {
+									state = 'meta';
+									need = length;
+									meta = [];
+								}
+							} else {
+								const n = Math.min(need, chunk.length - i);
+								for (let k = 0; k < n; k++) meta.push(chunk[i + k]);
+								i += n;
+								need -= n;
+								if (need === 0) {
+									onMetadata(new TextDecoder().decode(new Uint8Array(meta)).replace(/\0+$/, ''));
+									state = 'audio';
+									need = metaint;
+								}
+							}
+						}
+					},
+				};
+			}
+
+			async function run() {
+				$('log').textContent = '';
+				decided = false;
+				$('run').disabled = true;
+				$('stop').disabled = false;
+				controller = new AbortController();
+				const url = $('url').value.trim();
+				const started = performance.now();
+				const at = () => ((performance.now() - started) / 1000).toFixed(1).padStart(5) + ' с';
+				const timer = setTimeout(() => controller.abort(), MAX_SECONDS * 1000);
+
+				try {
+					log(`${at()}  запрос ${url} с заголовком Icy-MetaData: 1`);
+					let response;
+					try {
+						response = await fetch(url, {
+							headers: { 'Icy-MetaData': '1' },
+							signal: controller.signal,
+						});
+					} catch (error) {
+						if (controller.signal.aborted) throw error;
+						log(`${at()}  ОШИБКА: ${error.message}`);
+						log(
+							`${at()}  пробуем тот же запрос БЕЗ заголовка Icy-MetaData, чтобы понять причину...`,
+						);
+						try {
+							const plain = await fetch(url, { signal: controller.signal });
+							await plain.body.cancel();
+							verdict(
+								'bad',
+								'❌ Сервер не разрешает браузеру отправлять заголовок Icy-MetaData (CORS preflight). Читать метаданные из браузера нельзя. Обычное воспроизведение при этом работает.',
+							);
+						} catch (error2) {
+							log(`${at()}  и без заголовка тоже ошибка: ${error2.message}`);
+							verdict(
+								'bad',
+								'❌ Браузер не может прочитать поток (CORS или сеть). Проверьте адрес и откройте консоль.',
+							);
+						}
+						return;
+					}
+
+					log(
+						`${at()}  ответ: HTTP ${response.status}, content-type: ${response.headers.get('content-type')}`,
+					);
+					for (const [name, value] of response.headers) log(`           ${name}: ${value}`);
+
+					const headerValue = response.headers.get('icy-metaint');
+					const manual = Number.parseInt($('metaint').value, 10);
+					const metaint = headerValue ? Number.parseInt(headerValue, 10) : manual;
+					if (!metaint) {
+						await response.body.cancel();
+						verdict(
+							'warn',
+							'⚠️ Заголовок icy-metaint не виден браузеру (его нет в Access-Control-Expose-Headers) либо сервер не отдаёт метаданные. Можно попробовать подставить 16000 вручную.',
+						);
+						return;
+					}
+					log(
+						`${at()}  icy-metaint = ${metaint} (${headerValue ? 'из заголовка' : 'введён вручную'})`,
+					);
+
+					const titles = [];
+					let blocks = 0;
+					const parser = createParser(metaint, (text) => {
+						blocks++;
+						const match = /StreamTitle='(.*?)';/s.exec(text);
+						const title = match ? match[1] : null;
+						log(
+							`${at()}  блок метаданных #${blocks}: ${text === '' ? '(пусто: без изменений)' : JSON.stringify(text)}`,
+						);
+						if (title !== null && title !== titles.at(-1)) titles.push(title);
+					});
+
+					const reader = response.body.getReader();
+					for (;;) {
+						const { done, value } = await reader.read();
+						if (done) break;
+						parser.feed(value);
+					}
+					log(`${at()}  поток закончился сам`);
+				} catch (error) {
+					if (!controller.signal.aborted) {
+						log(`${at()}  ошибка чтения: ${error.message}`);
+						verdict('bad', `❌ Ошибка при чтении потока: ${error.message}`);
+					}
+				} finally {
+					clearTimeout(timer);
+					$('run').disabled = false;
+					$('stop').disabled = true;
+					finish();
+				}
+			}
+
+			function finish() {
+				if (decided) return; // an error case already explained itself
+				const text = $('log').textContent;
+				const titles = [...text.matchAll(/StreamTitle='(.*?)'/g)].map((m) => m[1]);
+				if (titles.length > 0) {
+					verdict(
+						'ok',
+						`✅ Метаданные читаются. Найденный трек: «${[...new Set(titles)].join('» → «')}». Название можно получать прямо из потока, без опроса API.`,
+					);
+				} else if (/блок метаданных/.test(text)) {
+					verdict(
+						'warn',
+						'⚠️ Блоки метаданных приходят, но в них нет StreamTitle (за время проверки трек не менялся или поле пустое). Запустите ещё раз ближе к смене трека.',
+					);
+				} else {
+					verdict('warn', '⚠️ За время проверки не пришло ни одного блока метаданных.');
+				}
+			}
+
+			async function capabilities() {
+				const lines = [];
+				const mse = typeof MediaSource === 'undefined' ? null : MediaSource;
+				lines.push(`MediaSource: ${mse ? 'есть' : 'НЕТ'}`);
+				if (mse) {
+					for (const type of ['audio/mpeg', 'audio/aac', 'audio/mp4; codecs="mp4a.40.2"']) {
+						lines.push(`  isTypeSupported(${type}): ${mse.isTypeSupported(type)}`);
+					}
+				}
+				lines.push(
+					`ManagedMediaSource (iOS 17.1+): ${'ManagedMediaSource' in window ? 'есть' : 'нет'}`,
+				);
+				lines.push(`Web Audio decodeAudioData: ${'AudioContext' in window ? 'есть' : 'нет'}`);
+				if ('AudioDecoder' in window) {
+					const mp3 = await AudioDecoder.isConfigSupported({
+						codec: 'mp3',
+						sampleRate: 44100,
+						numberOfChannels: 2,
+					});
+					lines.push(`WebCodecs AudioDecoder (mp3): ${mp3.supported}`);
+				} else {
+					lines.push('WebCodecs AudioDecoder: нет');
+				}
+				lines.push(`userAgent: ${navigator.userAgent}`);
+				$('caps').textContent = lines.join('\n');
+			}
+
+			$('run').addEventListener('click', () => {
+				verdict('warn', 'Идёт проверка...', false);
+				run();
+			});
+			$('stop').addEventListener('click', () => controller.abort());
+			capabilities();
+		</script>
+	</body>
+</html>

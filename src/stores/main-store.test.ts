@@ -17,7 +17,7 @@ function makeChannel(id: string, playlists = [{ url: `https://api.somafm.com/${i
 }
 
 function song(title: string) {
-	return { title, artist: 'Artist', album: '', albumart: '', date: '' };
+	return { title, artist: 'Artist', album: '', albumArt: '', date: '' };
 }
 
 function deferred<T>() {

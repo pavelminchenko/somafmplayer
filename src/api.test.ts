@@ -102,7 +102,7 @@ describe('api response validation', () => {
 	});
 
 	it('keeps only well-formed songs', async () => {
-		const song = { title: 'T', artist: 'A', album: '', albumart: '', date: '' };
+		const song = { title: 'T', artist: 'A', album: '', albumArt: '', date: '' };
 		respondWith(JSON.stringify({ songs: [song, { title: 1 }, null] }));
 		await expect(api.getChannelSongs('a')).resolves.toEqual([song]);
 	});
