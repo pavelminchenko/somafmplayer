@@ -70,14 +70,13 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: PlayerOptions =
 	const isPlaying = computed(() => ACTIVE_PHASES.has(phase.value));
 	const statusMessage = computed(() => {
 		switch (phase.value) {
-			case 'connecting': {
+			// A retry looks the same as the first connection: "trying to connect" is all there is to say.
+			case 'connecting':
+			case 'reconnecting': {
 				return 'Connecting…';
 			}
 			case 'buffering': {
 				return 'Buffering…';
-			}
-			case 'reconnecting': {
-				return `Connection lost. Reconnecting… (attempt ${String(reconnector.attempt.value)})`;
 			}
 			default: {
 				return '';

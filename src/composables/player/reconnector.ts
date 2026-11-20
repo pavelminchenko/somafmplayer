@@ -1,5 +1,3 @@
-import { readonly, ref } from 'vue';
-
 interface ReconnectorOptions {
 	/** How long to keep trying, counted from the first failure after the stream was last healthy. */
 	budgetMs: number;
@@ -15,7 +13,7 @@ interface ReconnectorOptions {
  * `'exhausted'`.
  */
 function createReconnector(options: ReconnectorOptions) {
-	const attempt = ref(0);
+	let attempt = 0;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let startedAt = 0;
 
@@ -27,7 +25,7 @@ function createReconnector(options: ReconnectorOptions) {
 	/** Starts over (a stream is healthy again, or a new one begins). Also cancels a pending retry. */
 	function reset() {
 		cancel();
-		attempt.value = 0;
+		attempt = 0;
 		startedAt = 0;
 	}
 
@@ -37,11 +35,11 @@ function createReconnector(options: ReconnectorOptions) {
 	 */
 	function schedule(run: () => void): 'scheduled' | 'exhausted' {
 		const now = Date.now();
-		if (attempt.value === 0) startedAt = now;
+		if (attempt === 0) startedAt = now;
 		if (now - startedAt >= options.budgetMs) return 'exhausted';
 
-		const delay = Math.min(options.baseDelayMs * 2 ** attempt.value, options.maxDelayMs);
-		attempt.value++;
+		const delay = Math.min(options.baseDelayMs * 2 ** attempt, options.maxDelayMs);
+		attempt++;
 		cancel();
 		timer = setTimeout(() => {
 			timer = undefined;
@@ -51,7 +49,6 @@ function createReconnector(options: ReconnectorOptions) {
 	}
 
 	return {
-		attempt: readonly(attempt),
 		schedule,
 		cancel,
 		reset,

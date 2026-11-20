@@ -112,13 +112,13 @@ describe('usePlayer status', () => {
 });
 
 describe('usePlayer automatic reconnect', () => {
-	it('shows the attempt and retries with backoff: 1 s, 2 s, 4 s, 8 s, then every 8 s', () => {
+	it('shows "Connecting…" and retries with backoff: 1 s, 2 s, 4 s, 8 s, then every 8 s', () => {
 		const { audio, player } = setupWithTimers();
 		startPlaying(player);
 
 		player.listeners.error();
 		expect(player.isPlaying.value).toBe(true);
-		expect(player.statusMessage.value).toBe('Connection lost. Reconnecting… (attempt 1)');
+		expect(player.statusMessage.value).toBe('Connecting…');
 		vi.advanceTimersByTime(999);
 		expect(audio.load).not.toHaveBeenCalled();
 		vi.advanceTimersByTime(1);
@@ -129,9 +129,7 @@ describe('usePlayer automatic reconnect', () => {
 		const waits = [2000, 4000, 8000, 8000, 8000];
 		waits.forEach((wait, index) => {
 			player.listeners.error();
-			expect(player.statusMessage.value).toBe(
-				`Connection lost. Reconnecting… (attempt ${String(index + 2)})`,
-			);
+			expect(player.statusMessage.value).toBe('Connecting…'); // a retry looks like the first connection
 			vi.advanceTimersByTime(wait - 1);
 			expect(audio.load).toHaveBeenCalledTimes(index + 1);
 			vi.advanceTimersByTime(1);
@@ -151,7 +149,7 @@ describe('usePlayer automatic reconnect', () => {
 		};
 		for (let round = 0; round < 8; round++) lose(); // the last one starts at 56 s: still within the minute
 		expect(player.errorMessage.value).toBe('');
-		expect(player.statusMessage.value).toContain('Reconnecting');
+		expect(player.statusMessage.value).toBe('Connecting…');
 
 		lose(false); // 64 s since the first loss: the minute is over, no retry is scheduled
 		expect(player.errorMessage.value).toContain(FAILED);
@@ -177,7 +175,7 @@ describe('usePlayer automatic reconnect', () => {
 		expect(player.statusMessage.value).toBe('');
 		expect(player.errorMessage.value).toBe('');
 		player.listeners.error(); // a later drop gets a fresh minute
-		expect(player.statusMessage.value).toBe('Connection lost. Reconnecting… (attempt 1)');
+		expect(player.statusMessage.value).toBe('Connecting…');
 	});
 
 	it('reconnects when the server closes the stream (ended)', () => {
@@ -266,7 +264,7 @@ describe('usePlayer watchdog (connection drops that raise no event)', () => {
 		expect(player.statusMessage.value).toBe('');
 		vi.advanceTimersByTime(2000);
 
-		expect(player.statusMessage.value).toBe('Connection lost. Reconnecting… (attempt 1)');
+		expect(player.statusMessage.value).toBe('Connecting…');
 		expect(player.isPlaying.value).toBe(true);
 	});
 
@@ -278,7 +276,7 @@ describe('usePlayer watchdog (connection drops that raise no event)', () => {
 
 		vi.advanceTimersByTime(7000);
 
-		expect(player.statusMessage.value).toContain('Reconnecting');
+		expect(player.statusMessage.value).toBe('Connecting…');
 	});
 
 	it('tolerates a short buffering blip', () => {
@@ -306,7 +304,7 @@ describe('usePlayer watchdog (connection drops that raise no event)', () => {
 		expect(player.statusMessage.value).toBe('Connecting…');
 		vi.advanceTimersByTime(2000);
 
-		expect(player.statusMessage.value).toContain('Reconnecting');
+		expect(player.statusMessage.value).toBe('Connecting…');
 	});
 
 	it('shows the final message after a minute of failed attempts without any error event', () => {
@@ -811,7 +809,7 @@ describe('usePlayer MSE transport', () => {
 		startPlaying(player);
 
 		vi.advanceTimersByTime(8000); // the stream stalls
-		expect(player.statusMessage.value).toContain('Reconnecting');
+		expect(player.statusMessage.value).toBe('Connecting…');
 		expect(transport.close).not.toHaveBeenCalled();
 	});
 
@@ -882,7 +880,7 @@ describe('usePlayer MSE transport', () => {
 
 		expect(transport.open.mock.calls).toEqual([['https://ice2.somafm.com/other', true]]);
 		expect(audio.load).not.toHaveBeenCalled();
-		expect(player.statusMessage.value).toBe('Connecting…'); // not "Reconnecting" the old channel
+		expect(player.statusMessage.value).toBe('Connecting…');
 	});
 
 	it('uses the normal reconnect (next mirror) once MSE has worked', () => {
@@ -891,7 +889,7 @@ describe('usePlayer MSE transport', () => {
 		transport.open.mockClear();
 
 		callbacks().onLost('network');
-		expect(player.statusMessage.value).toBe('Connection lost. Reconnecting… (attempt 1)');
+		expect(player.statusMessage.value).toBe('Connecting…');
 		vi.advanceTimersByTime(1000);
 
 		expect(transport.close).not.toHaveBeenCalled(); // no fallback

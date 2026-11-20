@@ -48,24 +48,16 @@ describe('createReconnector', () => {
 		expect(run).toHaveBeenCalledTimes(scheduled);
 	});
 
-	it('counts the attempts', () => {
-		const reconnector = setup();
-		expect(reconnector.attempt.value).toBe(0);
-		reconnector.schedule(vi.fn());
-		reconnector.schedule(vi.fn());
-		expect(reconnector.attempt.value).toBe(2);
-	});
-
-	it('cancel() drops a pending retry but keeps the count', () => {
+	it('cancel() drops a pending retry but keeps the backoff', () => {
 		const reconnector = setup();
 		const run = vi.fn();
-		reconnector.schedule(run);
+		reconnector.schedule(run); // 1 s
 
 		reconnector.cancel();
 		vi.advanceTimersByTime(10000);
-
 		expect(run).not.toHaveBeenCalled();
-		expect(reconnector.attempt.value).toBe(1);
+
+		expect(nextDelay(reconnector)).toBe(2000); // the next retry continues where it was
 	});
 
 	it('reset() drops a pending retry and gives a fresh minute from the shortest delay', () => {
@@ -75,7 +67,6 @@ describe('createReconnector', () => {
 		reconnector.schedule(vi.fn());
 
 		reconnector.reset();
-		expect(reconnector.attempt.value).toBe(0);
 		const run = vi.fn();
 		expect(reconnector.schedule(run)).toBe('scheduled');
 		vi.advanceTimersByTime(1000);
