@@ -55,7 +55,8 @@ export const useMainStore = defineStore('main-store', {
 		requestedChannelId: '',
 		channelLoading: false,
 		channelError: '',
-		streamUrl: '',
+		// Mirror servers of the current channel's stream, in playlist order.
+		streamUrls: [] as string[],
 		// When the current channel's songs were last loaded (ms since epoch; 0 = never).
 		songsUpdatedAt: 0,
 		// False for a channel restored after a reload: browsers block autoplay without a user gesture,
@@ -136,8 +137,8 @@ export const useMainStore = defineStore('main-store', {
 				}
 				const [playlist] = channel.playlists;
 
-				const [streamUrl, songs] = await Promise.all([
-					api.getStreamUrl(playlist.url, signal),
+				const [streamUrls, songs] = await Promise.all([
+					api.getStreamUrls(playlist.url, signal),
 					// Song history is optional: playback must not depend on it.
 					api.getChannelSongs(channel.id, signal).catch((error: unknown) => {
 						if (signal.aborted) throw error;
@@ -151,7 +152,7 @@ export const useMainStore = defineStore('main-store', {
 				// Commit everything at once so the title, songs and stream never diverge.
 				this.currentChannel = { ...channel, songs };
 				this.songsUpdatedAt = Date.now();
-				this.streamUrl = streamUrl;
+				this.streamUrls = streamUrls;
 				this.autoplay = autoplay;
 				writeLastChannelId(channel.id);
 			} catch (error) {

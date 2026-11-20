@@ -16,49 +16,79 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
-describe('api.getStreamUrl', () => {
+describe('api.getStreamUrls', () => {
 	const playlistUrl = 'https://api.somafm.com/groovesalad.pls';
 
 	it('parses a CRLF playlist and ignores surrounding lines', async () => {
 		respondWith(
 			'[playlist]\r\nnumberofentries=1\r\nFile1=https://ice1.somafm.com/groovesalad-128-mp3\r\nTitle1=SomaFM\r\n',
 		);
-		await expect(api.getStreamUrl(playlistUrl)).resolves.toBe(
+		await expect(api.getStreamUrls(playlistUrl)).resolves.toEqual([
 			'https://ice1.somafm.com/groovesalad-128-mp3',
+		]);
+	});
+
+	it('returns every mirror server in playlist order, without duplicates', async () => {
+		respondWith(
+			[
+				'[playlist]',
+				'numberofentries=5',
+				'File1=https://ice4.somafm.com/deepspaceone-128-mp3',
+				'Title1=SomaFM: Deep Space One (#1): Deep ambient music.',
+				'File2=https://ice6.somafm.com/deepspaceone-128-mp3',
+				'File3=https://ice2.somafm.com/deepspaceone-128-mp3',
+				'File4=https://ice4.somafm.com/deepspaceone-128-mp3',
+				'File5=https://ice5.somafm.com/deepspaceone-128-mp3',
+			].join('\n'),
 		);
+		await expect(api.getStreamUrls(playlistUrl)).resolves.toEqual([
+			'https://ice4.somafm.com/deepspaceone-128-mp3',
+			'https://ice6.somafm.com/deepspaceone-128-mp3',
+			'https://ice2.somafm.com/deepspaceone-128-mp3',
+			'https://ice5.somafm.com/deepspaceone-128-mp3',
+		]);
 	});
 
 	it('upgrades http streams on SomaFM hosts to https', async () => {
 		respondWith('File1=http://ice2.somafm.com/groovesalad-128-mp3\n');
-		await expect(api.getStreamUrl(playlistUrl)).resolves.toBe(
+		await expect(api.getStreamUrls(playlistUrl)).resolves.toEqual([
 			'https://ice2.somafm.com/groovesalad-128-mp3',
-		);
+		]);
 	});
 
-	it('rejects a stream on a foreign host', async () => {
+	it('skips mirrors on foreign hosts but keeps the trusted ones', async () => {
+		respondWith(
+			'File1=https://evil.example/stream.mp3\nFile2=https://ice2.somafm.com/groovesalad-128-mp3\n',
+		);
+		await expect(api.getStreamUrls(playlistUrl)).resolves.toEqual([
+			'https://ice2.somafm.com/groovesalad-128-mp3',
+		]);
+	});
+
+	it('rejects a playlist whose only stream is on a foreign host', async () => {
 		respondWith('File1=https://evil.example/stream.mp3\n');
-		await expect(api.getStreamUrl(playlistUrl)).rejects.toThrow('Untrusted URL host');
+		await expect(api.getStreamUrls(playlistUrl)).rejects.toThrow('Untrusted URL host');
 	});
 
 	it('rejects look-alike hosts', async () => {
 		respondWith('File1=https://notsomafm.com/stream.mp3\n');
-		await expect(api.getStreamUrl(playlistUrl)).rejects.toThrow('Untrusted URL host');
+		await expect(api.getStreamUrls(playlistUrl)).rejects.toThrow('Untrusted URL host');
 	});
 
 	it('rejects a playlist without any URL', async () => {
 		respondWith('[playlist]\nnumberofentries=0\n');
-		await expect(api.getStreamUrl(playlistUrl)).rejects.toThrow('Stream URL not found');
+		await expect(api.getStreamUrls(playlistUrl)).rejects.toThrow('Stream URL not found');
 	});
 
 	it('does not fetch a playlist from an untrusted host', async () => {
-		await expect(api.getStreamUrl('https://evil.example/x.pls')).rejects.toThrow(
+		await expect(api.getStreamUrls('https://evil.example/x.pls')).rejects.toThrow(
 			'Untrusted URL host',
 		);
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
 	it('rejects non-http(s) schemes', async () => {
-		await expect(api.getStreamUrl('ftp://api.somafm.com/groovesalad.pls')).rejects.toThrow(
+		await expect(api.getStreamUrls('ftp://api.somafm.com/groovesalad.pls')).rejects.toThrow(
 			'Untrusted URL host',
 		);
 		expect(fetchMock).not.toHaveBeenCalled();

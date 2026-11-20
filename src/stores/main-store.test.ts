@@ -7,7 +7,7 @@ import type { ChannelSummary } from '@/types';
 
 vi.mock('@/api.ts', async (importOriginal) => ({
 	...(await importOriginal<typeof import('@/api.ts')>()),
-	api: { getChannels: vi.fn(), getChannelSongs: vi.fn(), getStreamUrl: vi.fn() },
+	api: { getChannels: vi.fn(), getChannelSongs: vi.fn(), getStreamUrls: vi.fn() },
 }));
 
 const mocked = vi.mocked(api);
@@ -37,7 +37,7 @@ beforeEach(() => {
 
 describe('setCurrentChannel', () => {
 	it('commits channel, songs and stream together', async () => {
-		mocked.getStreamUrl.mockResolvedValue('https://ice1.somafm.com/a');
+		mocked.getStreamUrls.mockResolvedValue(['https://ice1.somafm.com/a']);
 		mocked.getChannelSongs.mockResolvedValue([song('One')]);
 		const store = useMainStore();
 
@@ -45,7 +45,7 @@ describe('setCurrentChannel', () => {
 
 		expect(store.currentChannel?.id).toBe('a');
 		expect(store.currentChannel?.songs[0].title).toBe('One');
-		expect(store.streamUrl).toBe('https://ice1.somafm.com/a');
+		expect(store.streamUrls).toEqual(['https://ice1.somafm.com/a']);
 		expect(store.channelError).toBe('');
 		expect(store.channelLoading).toBe(false);
 	});
@@ -53,7 +53,7 @@ describe('setCurrentChannel', () => {
 	it('records when the songs were loaded', async () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
-		mocked.getStreamUrl.mockResolvedValue('https://ice1.somafm.com/a');
+		mocked.getStreamUrls.mockResolvedValue(['https://ice1.somafm.com/a']);
 		mocked.getChannelSongs.mockResolvedValue([song('One')]);
 		const store = useMainStore();
 		expect(store.songsUpdatedAt).toBe(0);
@@ -67,14 +67,27 @@ describe('setCurrentChannel', () => {
 		vi.useRealTimers();
 	});
 
+	it('keeps every mirror server of the stream', async () => {
+		mocked.getStreamUrls.mockResolvedValue([
+			'https://ice4.somafm.com/a',
+			'https://ice6.somafm.com/a',
+		]);
+		mocked.getChannelSongs.mockResolvedValue([]);
+		const store = useMainStore();
+
+		await store.setCurrentChannel(makeChannel('a'));
+
+		expect(store.streamUrls).toEqual(['https://ice4.somafm.com/a', 'https://ice6.somafm.com/a']);
+	});
+
 	it('keeps the previous channel untouched while the next one is loading', async () => {
-		mocked.getStreamUrl.mockResolvedValueOnce('https://ice1.somafm.com/a');
+		mocked.getStreamUrls.mockResolvedValueOnce(['https://ice1.somafm.com/a']);
 		mocked.getChannelSongs.mockResolvedValueOnce([song('A song')]);
 		const store = useMainStore();
 		await store.setCurrentChannel(makeChannel('a'));
 
-		const slowStream = deferred<string>();
-		mocked.getStreamUrl.mockReturnValueOnce(slowStream.promise);
+		const slowStream = deferred<string[]>();
+		mocked.getStreamUrls.mockReturnValueOnce(slowStream.promise);
 		mocked.getChannelSongs.mockResolvedValueOnce([song('B song')]);
 		const pending = store.setCurrentChannel(makeChannel('b'));
 
@@ -82,15 +95,15 @@ describe('setCurrentChannel', () => {
 		expect(store.currentChannel?.songs[0].title).toBe('A song');
 		expect(store.channelLoading).toBe(true);
 
-		slowStream.resolve('https://ice1.somafm.com/b');
+		slowStream.resolve(['https://ice1.somafm.com/b']);
 		await pending;
 		expect(store.currentChannel?.id).toBe('b');
 	});
 
 	it('ignores a slow response for a channel that was replaced (A then B)', async () => {
-		const slowA = deferred<string>();
-		mocked.getStreamUrl.mockImplementation((url: string) =>
-			url.includes('/a.pls') ? slowA.promise : Promise.resolve('https://ice1.somafm.com/b'),
+		const slowA = deferred<string[]>();
+		mocked.getStreamUrls.mockImplementation((url: string) =>
+			url.includes('/a.pls') ? slowA.promise : Promise.resolve(['https://ice1.somafm.com/b']),
 		);
 		mocked.getChannelSongs.mockImplementation((id: string) =>
 			Promise.resolve([song(`song-${id}`)]),
@@ -99,20 +112,20 @@ describe('setCurrentChannel', () => {
 
 		const first = store.setCurrentChannel(makeChannel('a'));
 		await store.setCurrentChannel(makeChannel('b'));
-		slowA.resolve('https://ice1.somafm.com/a'); // A finally answers, after B won
+		slowA.resolve(['https://ice1.somafm.com/a']); // A finally answers, after B won
 		await first;
 
 		expect(store.currentChannel?.id).toBe('b');
-		expect(store.streamUrl).toBe('https://ice1.somafm.com/b');
+		expect(store.streamUrls).toEqual(['https://ice1.somafm.com/b']);
 		expect(store.currentChannel?.songs[0].title).toBe('song-b');
 		expect(store.channelError).toBe('');
 		expect(store.channelLoading).toBe(false);
 	});
 
 	it('aborts the request of the replaced channel', async () => {
-		const gate = deferred<string>();
+		const gate = deferred<string[]>();
 		const signals: AbortSignal[] = [];
-		mocked.getStreamUrl.mockImplementation((_url: string, signal?: AbortSignal) => {
+		mocked.getStreamUrls.mockImplementation((_url: string, signal?: AbortSignal) => {
 			if (signal) signals.push(signal);
 			return gate.promise;
 		});
@@ -125,34 +138,34 @@ describe('setCurrentChannel', () => {
 		expect(signals[0].aborted).toBe(true);
 		expect(signals[1].aborted).toBe(false);
 
-		gate.resolve('https://ice1.somafm.com/b');
+		gate.resolve(['https://ice1.somafm.com/b']);
 		await Promise.all([first, second]);
 	});
 
 	it('reports an error and keeps the old channel when the stream fails', async () => {
-		mocked.getStreamUrl.mockResolvedValueOnce('https://ice1.somafm.com/a');
+		mocked.getStreamUrls.mockResolvedValueOnce(['https://ice1.somafm.com/a']);
 		mocked.getChannelSongs.mockResolvedValue([]);
 		const store = useMainStore();
 		await store.setCurrentChannel(makeChannel('a'));
 
-		mocked.getStreamUrl.mockRejectedValueOnce(new Error('boom'));
+		mocked.getStreamUrls.mockRejectedValueOnce(new Error('boom'));
 		await store.setCurrentChannel(makeChannel('b'));
 
 		expect(store.channelError).toBe('boom');
 		expect(store.currentChannel?.id).toBe('a');
-		expect(store.streamUrl).toBe('https://ice1.somafm.com/a');
+		expect(store.streamUrls).toEqual(['https://ice1.somafm.com/a']);
 		expect(store.channelLoading).toBe(false);
 	});
 
 	it('does not require song history for playback', async () => {
-		mocked.getStreamUrl.mockResolvedValue('https://ice1.somafm.com/a');
+		mocked.getStreamUrls.mockResolvedValue(['https://ice1.somafm.com/a']);
 		mocked.getChannelSongs.mockRejectedValue(new Error('songs down'));
 		const store = useMainStore();
 
 		await store.setCurrentChannel(makeChannel('a'));
 
 		expect(store.channelError).toBe('');
-		expect(store.streamUrl).toBe('https://ice1.somafm.com/a');
+		expect(store.streamUrls).toEqual(['https://ice1.somafm.com/a']);
 		expect(store.currentChannel?.songs).toEqual([]);
 	});
 
@@ -163,19 +176,19 @@ describe('setCurrentChannel', () => {
 
 		expect(store.channelError).toContain('has no playlists');
 		expect(store.currentChannel).toBeNull();
-		expect(store.streamUrl).toBe('');
-		expect(mocked.getStreamUrl).not.toHaveBeenCalled();
+		expect(store.streamUrls).toEqual([]);
+		expect(mocked.getStreamUrls).not.toHaveBeenCalled();
 	});
 
 	it('cancels a pending switch when the user goes back to the playing channel', async () => {
-		mocked.getStreamUrl.mockResolvedValueOnce('https://ice1.somafm.com/a');
+		mocked.getStreamUrls.mockResolvedValueOnce(['https://ice1.somafm.com/a']);
 		mocked.getChannelSongs.mockResolvedValue([]);
 		const store = useMainStore();
 		await store.setCurrentChannel(makeChannel('a'));
 
-		const gate = deferred<string>();
+		const gate = deferred<string[]>();
 		const signals: AbortSignal[] = [];
-		mocked.getStreamUrl.mockImplementationOnce((_url: string, signal?: AbortSignal) => {
+		mocked.getStreamUrls.mockImplementationOnce((_url: string, signal?: AbortSignal) => {
 			if (signal) signals.push(signal);
 			return gate.promise;
 		});
@@ -183,49 +196,49 @@ describe('setCurrentChannel', () => {
 		expect(store.channelLoading).toBe(true);
 
 		await store.setCurrentChannel(makeChannel('a')); // changed my mind
-		gate.resolve('https://ice1.somafm.com/b'); // B answers late
+		gate.resolve(['https://ice1.somafm.com/b']); // B answers late
 		await pendingB;
 
 		expect(signals[0].aborted).toBe(true);
 		expect(store.currentChannel?.id).toBe('a');
-		expect(store.streamUrl).toBe('https://ice1.somafm.com/a');
+		expect(store.streamUrls).toEqual(['https://ice1.somafm.com/a']);
 		expect(store.requestedChannelId).toBe('a');
 		expect(store.channelLoading).toBe(false);
 	});
 
 	it('ignores a repeated click on the channel that is already loading', async () => {
-		const gate = deferred<string>();
-		mocked.getStreamUrl.mockReturnValue(gate.promise);
+		const gate = deferred<string[]>();
+		mocked.getStreamUrls.mockReturnValue(gate.promise);
 		mocked.getChannelSongs.mockResolvedValue([]);
 		const store = useMainStore();
 
 		const first = store.setCurrentChannel(makeChannel('a'));
 		await store.setCurrentChannel(makeChannel('a'));
-		gate.resolve('https://ice1.somafm.com/a');
+		gate.resolve(['https://ice1.somafm.com/a']);
 		await first;
 
-		expect(mocked.getStreamUrl).toHaveBeenCalledTimes(1);
+		expect(mocked.getStreamUrls).toHaveBeenCalledTimes(1);
 		expect(store.currentChannel?.id).toBe('a');
 	});
 
 	it('does nothing when the same channel is selected again', async () => {
-		mocked.getStreamUrl.mockResolvedValue('https://ice1.somafm.com/a');
+		mocked.getStreamUrls.mockResolvedValue(['https://ice1.somafm.com/a']);
 		mocked.getChannelSongs.mockResolvedValue([]);
 		const store = useMainStore();
 		await store.setCurrentChannel(makeChannel('a'));
 		await store.setCurrentChannel(makeChannel('a'));
 
-		expect(mocked.getStreamUrl).toHaveBeenCalledTimes(1);
+		expect(mocked.getStreamUrls).toHaveBeenCalledTimes(1);
 	});
 
 	it('retries the same channel after an error', async () => {
 		mocked.getChannelSongs.mockResolvedValue([]);
-		mocked.getStreamUrl.mockRejectedValueOnce(new Error('boom'));
+		mocked.getStreamUrls.mockRejectedValueOnce(new Error('boom'));
 		const store = useMainStore();
 		await store.setCurrentChannel(makeChannel('a'));
 		expect(store.channelError).toBe('boom');
 
-		mocked.getStreamUrl.mockResolvedValueOnce('https://ice1.somafm.com/a');
+		mocked.getStreamUrls.mockResolvedValueOnce(['https://ice1.somafm.com/a']);
 		await store.setCurrentChannel(makeChannel('a'));
 
 		expect(store.channelError).toBe('');
@@ -235,7 +248,7 @@ describe('setCurrentChannel', () => {
 
 describe('refreshCurrentSongs', () => {
 	it('drops a response that arrives after the channel was switched', async () => {
-		mocked.getStreamUrl.mockResolvedValue('https://ice1.somafm.com/x');
+		mocked.getStreamUrls.mockResolvedValue(['https://ice1.somafm.com/x']);
 		mocked.getChannelSongs.mockResolvedValue([song('initial')]);
 		const store = useMainStore();
 		await store.setCurrentChannel(makeChannel('a'));
@@ -254,7 +267,7 @@ describe('refreshCurrentSongs', () => {
 	});
 
 	it('swallows transient errors', async () => {
-		mocked.getStreamUrl.mockResolvedValue('https://ice1.somafm.com/a');
+		mocked.getStreamUrls.mockResolvedValue(['https://ice1.somafm.com/a']);
 		mocked.getChannelSongs.mockResolvedValueOnce([song('kept')]);
 		const store = useMainStore();
 		await store.setCurrentChannel(makeChannel('a'));
@@ -346,7 +359,7 @@ describe('loadChannels', () => {
 });
 
 async function startOn(id: string) {
-	mocked.getStreamUrl.mockResolvedValue('https://ice1.somafm.com/x');
+	mocked.getStreamUrls.mockResolvedValue(['https://ice1.somafm.com/x']);
 	mocked.getChannelSongs.mockResolvedValue([]);
 	const store = useMainStore();
 	store.channels = ['a', 'b', 'c'].map((channelId) => makeChannel(channelId));
@@ -378,12 +391,12 @@ describe('selectAdjacentChannel', () => {
 
 	it('keeps moving on quick repeated clicks while a channel is still loading', async () => {
 		const store = await startOn('a');
-		const gate = deferred<string>();
-		mocked.getStreamUrl.mockReturnValue(gate.promise);
+		const gate = deferred<string[]>();
+		mocked.getStreamUrls.mockReturnValue(gate.promise);
 
 		const first = store.selectAdjacentChannel(1); // a -> b (still loading)
 		const second = store.selectAdjacentChannel(1); // should go b -> c, not retry b
-		gate.resolve('https://ice1.somafm.com/y');
+		gate.resolve(['https://ice1.somafm.com/y']);
 		await Promise.all([first, second]);
 
 		expect(store.currentChannel?.id).toBe('c');
@@ -394,13 +407,13 @@ describe('selectAdjacentChannel', () => {
 		store.channels = [makeChannel('a')];
 		await store.selectAdjacentChannel(1);
 		expect(store.currentChannel).toBeNull();
-		expect(mocked.getStreamUrl).not.toHaveBeenCalled();
+		expect(mocked.getStreamUrls).not.toHaveBeenCalled();
 	});
 });
 
 function ready(data: Map<string, string>, ...ids: string[]) {
 	mocked.getChannels.mockResolvedValue(ids.map((id) => makeChannel(id)));
-	mocked.getStreamUrl.mockResolvedValue('https://ice1.somafm.com/x');
+	mocked.getStreamUrls.mockResolvedValue(['https://ice1.somafm.com/x']);
 	mocked.getChannelSongs.mockResolvedValue([]);
 	return data;
 }
@@ -410,7 +423,7 @@ describe('last selected channel', () => {
 
 	it('remembers the channel the user selected', async () => {
 		const data = stubStorage();
-		mocked.getStreamUrl.mockResolvedValue('https://ice1.somafm.com/x');
+		mocked.getStreamUrls.mockResolvedValue(['https://ice1.somafm.com/x']);
 		mocked.getChannelSongs.mockResolvedValue([]);
 
 		await useMainStore().setCurrentChannel(makeChannel('b'));
@@ -420,7 +433,7 @@ describe('last selected channel', () => {
 
 	it('does not remember a channel that failed to load', async () => {
 		const data = stubStorage();
-		mocked.getStreamUrl.mockRejectedValue(new Error('boom'));
+		mocked.getStreamUrls.mockRejectedValue(new Error('boom'));
 		mocked.getChannelSongs.mockResolvedValue([]);
 
 		await useMainStore().setCurrentChannel(makeChannel('b'));
@@ -435,7 +448,7 @@ describe('last selected channel', () => {
 		await store.loadChannels();
 
 		expect(store.currentChannel?.id).toBe('b');
-		expect(store.streamUrl).toBe('https://ice1.somafm.com/x');
+		expect(store.streamUrls).toEqual(['https://ice1.somafm.com/x']);
 		expect(store.autoplay).toBe(false);
 	});
 
@@ -456,7 +469,7 @@ describe('last selected channel', () => {
 			'somafm-player:channels': JSON.stringify([makeChannel('a'), makeChannel('b')]),
 		});
 		mocked.getChannels.mockReturnValue(deferred<ChannelSummary[]>().promise); // the network never answers
-		mocked.getStreamUrl.mockResolvedValue('https://ice1.somafm.com/x');
+		mocked.getStreamUrls.mockResolvedValue(['https://ice1.somafm.com/x']);
 		mocked.getChannelSongs.mockResolvedValue([]);
 		const store = useMainStore();
 
@@ -475,7 +488,7 @@ describe('last selected channel', () => {
 		await store.loadChannels();
 
 		expect(store.currentChannel).toBeNull();
-		expect(mocked.getStreamUrl).not.toHaveBeenCalled();
+		expect(mocked.getStreamUrls).not.toHaveBeenCalled();
 	});
 
 	it('does not override a channel the user already chose', async () => {
@@ -490,7 +503,7 @@ describe('last selected channel', () => {
 
 	it('fails silently when the restored channel cannot be loaded', async () => {
 		ready(stubStorage({ [LAST_KEY]: 'b' }), 'a', 'b');
-		mocked.getStreamUrl.mockRejectedValue(new Error('boom'));
+		mocked.getStreamUrls.mockRejectedValue(new Error('boom'));
 		const store = useMainStore();
 
 		await store.loadChannels();

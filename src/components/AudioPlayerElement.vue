@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import AudioPlayerElementControls from '@/components/AudioPlayerElementControls.vue';
 import AudioPlayerElementVisualizer from '@/components/AudioPlayerElementVisualizer.vue';
 import { useMediaSession } from '@/composables/media-session';
@@ -7,10 +7,10 @@ import { usePlayer } from '@/composables/player';
 import { useSongRefresh } from '@/composables/song-refresh';
 import { useMainStore } from '@/stores/main-store';
 
-const props = defineProps<{ src: string }>();
-
 const mainStore = useMainStore();
 const audio = ref<HTMLAudioElement | null>(null);
+// The player owns the element's source: it picks the mirror server, fails over to the next one
+// when the connection drops and fades the sound out before a new stream replaces the old one.
 const {
 	output,
 	isPlaying,
@@ -21,20 +21,11 @@ const {
 	resume,
 	pause,
 	toggle,
-	duck,
 	listeners,
-} = usePlayer(audio, { autoplay: computed(() => mainStore.autoplay) });
-
-// The element is pointed at a new stream only after the old one was faded out, otherwise
-// replacing a sounding stream cuts the waveform and clicks.
-const currentSrc = ref(props.src);
-watch(
-	() => props.src,
-	async (src) => {
-		await duck();
-		if (src === props.src) currentSrc.value = src;
-	},
-);
+} = usePlayer(audio, {
+	sources: computed(() => mainStore.streamUrls),
+	autoplay: computed(() => mainStore.autoplay),
+});
 
 useSongRefresh(isPlaying);
 useMediaSession(isPlaying, {
@@ -47,15 +38,7 @@ useMediaSession(isPlaying, {
 
 <template>
 	<div class="audio-player-element">
-		<audio
-			v-show="false"
-			ref="audio"
-			:autoplay="mainStore.autoplay"
-			:preload="mainStore.autoplay ? 'auto' : 'none'"
-			:src="currentSrc"
-			crossorigin="anonymous"
-			v-on="listeners"
-		></audio>
+		<audio v-show="false" ref="audio" crossorigin="anonymous" v-on="listeners"></audio>
 		<p v-if="errorMessage" class="error" role="alert">{{ errorMessage }}</p>
 		<p v-else-if="statusMessage" class="status" role="status">{{ statusMessage }}</p>
 		<AudioPlayerElementControls

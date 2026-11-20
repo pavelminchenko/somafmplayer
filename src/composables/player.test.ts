@@ -14,20 +14,23 @@ function makeAudio(paused = true) {
 		play: vi.fn(() => Promise.resolve()),
 		pause: vi.fn(),
 		load: vi.fn(),
+		src: '',
+		autoplay: true,
+		preload: 'auto',
 	};
 }
 
-function setup(audio = makeAudio()) {
+function setup(audio = makeAudio(), options: Parameters<typeof usePlayer>[1] = {}) {
 	const element = ref(audio as unknown as HTMLAudioElement);
 	const scope = effectScope();
-	const player = scope.run(() => usePlayer(element));
+	const player = scope.run(() => usePlayer(element, options));
 	if (!player) throw new Error('usePlayer did not run');
 	return { audio, player, scope };
 }
 
-function setupWithTimers(audio = makeAudio()) {
+function setupWithTimers(audio = makeAudio(), options: Parameters<typeof usePlayer>[1] = {}) {
 	vi.useFakeTimers();
-	return setup(audio);
+	return setup(audio, options);
 }
 
 const domError = (name: string) => new DOMException('x', name);
@@ -497,6 +500,146 @@ describe('normalizeVolume', () => {
 	});
 });
 
+const MIRRORS = [
+	'https://ice4.somafm.com/deepspaceone-128-mp3',
+	'https://ice6.somafm.com/deepspaceone-128-mp3',
+	'https://ice2.somafm.com/deepspaceone-128-mp3',
+	'https://ice5.somafm.com/deepspaceone-128-mp3',
+];
+
+function withMirrors() {
+	const sources = ref([...MIRRORS]);
+	return { sources, ...setupWithTimers(makeAudio(), { sources }) };
+}
+
+describe('usePlayer mirror servers', () => {
+	it('starts on the first server and prepares autoplay/preload before assigning it', () => {
+		const sources = ref([...MIRRORS]);
+		const audio = makeAudio();
+		setup(audio, { sources, autoplay: ref(false) });
+
+		expect(audio.src).toBe(MIRRORS[0]);
+		expect(audio.autoplay).toBe(false);
+		expect(audio.preload).toBe('none');
+	});
+
+	it('fails over to the next mirror on every reconnect attempt', () => {
+		const { audio, player } = withMirrors();
+		startPlaying(player);
+
+		player.listeners.error();
+		vi.advanceTimersByTime(1000);
+		expect(audio.src).toBe(MIRRORS[1]);
+		player.listeners.loadstart();
+
+		player.listeners.error();
+		vi.advanceTimersByTime(2000);
+		expect(audio.src).toBe(MIRRORS[2]);
+		player.listeners.loadstart();
+
+		player.listeners.error();
+		vi.advanceTimersByTime(4000);
+		expect(audio.src).toBe(MIRRORS[3]);
+		expect(audio.load).not.toHaveBeenCalled(); // assigning src is what restarts the stream
+	});
+
+	it('wraps around to the first server after the last one', () => {
+		const sources = ref([MIRRORS[0], MIRRORS[1]]);
+		const { audio, player } = setupWithTimers(makeAudio(), { sources });
+		startPlaying(player);
+
+		player.listeners.error();
+		vi.advanceTimersByTime(1000);
+		expect(audio.src).toBe(MIRRORS[1]); // the last server
+		player.listeners.loadstart();
+
+		player.listeners.error();
+		vi.advanceTimersByTime(2000);
+		expect(audio.src).toBe(MIRRORS[0]); // back to the first one
+		player.listeners.loadstart();
+
+		player.listeners.error();
+		vi.advanceTimersByTime(4000);
+		expect(audio.src).toBe(MIRRORS[1]);
+	});
+
+	it('reuses load() when there is only one server', () => {
+		const sources = ref([MIRRORS[0]]);
+		const { audio, player } = setupWithTimers(makeAudio(), { sources });
+		startPlaying(player);
+
+		player.listeners.error();
+		vi.advanceTimersByTime(1000);
+
+		expect(audio.src).toBe(MIRRORS[0]);
+		expect(audio.load).toHaveBeenCalledOnce();
+	});
+
+	it('starts again from the primary server after every attempt failed', async () => {
+		const { audio, player } = withMirrors();
+		player.listeners.loadstart();
+		for (const untilReload of [12000, 13000, 15000]) {
+			vi.advanceTimersByTime(untilReload);
+			player.listeners.loadstart();
+		}
+		vi.advanceTimersByTime(11000);
+		expect(player.errorMessage.value).toContain(FAILED);
+		expect(audio.src).toBe(MIRRORS[3]);
+
+		await player.resume();
+
+		expect(audio.src).toBe(MIRRORS[0]);
+		expect(player.statusMessage.value).toBe('Connecting…');
+	});
+
+	it('tries the next mirror when the user resumes after a media error', async () => {
+		const { audio, player } = withMirrors();
+		startPlaying(player);
+		audio.error = { code: 2 };
+
+		await player.resume();
+
+		expect(audio.src).toBe(MIRRORS[1]);
+	});
+
+	it('reloads the same mirror after a long pause (the server is fine, the buffer is old)', async () => {
+		const { audio, player } = withMirrors();
+		startPlaying(player);
+
+		player.pause();
+		vi.advanceTimersByTime(60000);
+		await player.resume();
+
+		expect(audio.src).toBe(MIRRORS[0]);
+		expect(audio.load).toHaveBeenCalledOnce();
+	});
+
+	it('switches to the servers of a new channel only after fading the old stream out', async () => {
+		const { audio, sources } = withMirrors();
+		await nextTick();
+		expect(audio.src).toBe(MIRRORS[0]);
+
+		sources.value = ['https://ice2.somafm.com/groovesalad-128-mp3'];
+		await nextTick();
+		await vi.advanceTimersByTimeAsync(100);
+
+		expect(audio.src).toBe('https://ice2.somafm.com/groovesalad-128-mp3');
+	});
+
+	it('lets the last of several quick channel switches win', async () => {
+		const { audio, sources } = withMirrors();
+		await nextTick();
+
+		sources.value = ['https://ice2.somafm.com/a'];
+		await nextTick();
+		sources.value = ['https://ice2.somafm.com/b'];
+		await nextTick();
+		await vi.advanceTimersByTimeAsync(500);
+
+		expect(audio.src).toBe('https://ice2.somafm.com/b');
+	});
+});
+
 /** Minimal Web Audio graph: records what is asked of the GainNode. */
 function stubWebAudio() {
 	const gain = { value: 1, cancelScheduledValues: vi.fn(), setTargetAtTime: vi.fn() };
@@ -631,22 +774,22 @@ describe('usePlayer click-free level changes (Web Audio)', () => {
 		expect(web.lastTarget()).toBe(1);
 	});
 
-	it('ducks before a stream is replaced and resolves once silent', async () => {
+	it('fades the old stream out before a channel switch replaces it', async () => {
 		const web = stubWebAudio();
-		const { player } = setupWithTimers();
+		const sources = ref([...MIRRORS]);
+		const { audio, player } = setupWithTimers(makeAudio(), { sources });
 		startPlaying(player);
+		await nextTick();
 
-		let done = false;
-		const ducking = player.duck().then(() => {
-			done = true;
-		});
-		expect(web.lastTarget()).toBe(0);
-		await vi.advanceTimersByTimeAsync(FADE_MS - 1);
-		expect(done).toBe(false);
-		await vi.advanceTimersByTimeAsync(1);
-		await ducking;
+		sources.value = ['https://ice2.somafm.com/groovesalad-128-mp3'];
+		await nextTick();
+		expect(web.lastTarget()).toBe(0); // fading out
+		expect(audio.src).toBe(MIRRORS[0]); // the old stream is still attached
+		await vi.advanceTimersByTimeAsync(FADE_MS);
 
-		expect(done).toBe(true);
+		expect(audio.src).toBe('https://ice2.somafm.com/groovesalad-128-mp3');
+		player.listeners.playing();
+		expect(web.lastTarget()).toBe(1); // fades back in on the new stream
 	});
 
 	it('applies the persisted volume and the envelope together (volume x envelope)', async () => {

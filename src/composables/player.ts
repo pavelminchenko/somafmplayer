@@ -1,5 +1,14 @@
 import { useStorage } from '@vueuse/core';
-import { computed, onScopeDispose, readonly, type Ref, ref, shallowRef, watchEffect } from 'vue';
+import {
+	computed,
+	onScopeDispose,
+	readonly,
+	type Ref,
+	ref,
+	shallowRef,
+	watch,
+	watchEffect,
+} from 'vue';
 import { AudioOutput, FADE_MS } from '@/lib/audio-output';
 
 type Phase = 'idle' | 'connecting' | 'playing' | 'buffering' | 'reconnecting' | 'paused' | 'failed';
@@ -34,7 +43,14 @@ function normalizeVolume(value: number) {
  *
  * Bind `listeners` to the element with `v-on`, and drive playback with `resume`/`pause`/`toggle`.
  */
-function usePlayer(audio: Ref<HTMLAudioElement | null>, options: { autoplay?: Ref<boolean> } = {}) {
+interface PlayerOptions {
+	/** Mirror servers of the current stream (the first one is tried first). */
+	sources?: Ref<string[]>;
+	/** False to prepare a stream without starting it (e.g. a channel restored after a reload). */
+	autoplay?: Ref<boolean>;
+}
+
+function usePlayer(audio: Ref<HTMLAudioElement | null>, options: PlayerOptions = {}) {
 	const phase = ref<Phase>('idle');
 	const errorMessage = ref('');
 	const reconnectAttempt = ref(0);
@@ -189,6 +205,33 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: { autoplay?: Re
 		watchdog = setInterval(checkProgress, WATCHDOG_INTERVAL_MS);
 	}
 
+	// ---- stream source: mirror servers and failover ----
+	let mirrorIndex = 0;
+	let currentSource = '';
+
+	/** Points the element at `url`; assigning `src` starts loading, a same-URL reload needs `load()`. */
+	function setElementSource(element: HTMLAudioElement, url: string) {
+		if (currentSource === url) {
+			element.load();
+			return;
+		}
+		currentSource = url;
+		element.src = url;
+	}
+
+	/** Restarts the stream, optionally on the next mirror (all of them serve the same channel). */
+	function reloadStream({ nextMirror }: { nextMirror: boolean }) {
+		const element = audio.value;
+		if (!element) return;
+		const urls = options.sources?.value ?? [];
+		if (urls.length === 0) {
+			element.load(); // no source management: reload whatever is set
+			return;
+		}
+		if (nextMirror) mirrorIndex = (mirrorIndex + 1) % urls.length;
+		setElementSource(element, urls[mirrorIndex] ?? urls[0]);
+	}
+
 	/** The stream died (error event, premature end or a stalled connection). */
 	function connectionLost() {
 		stopWatchdog();
@@ -209,7 +252,7 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: { autoplay?: Re
 		reconnectTimer = setTimeout(async () => {
 			reconnectTimer = undefined;
 			isReconnecting = true;
-			audio.value?.load();
+			reloadStream({ nextMirror: true });
 			startWatchdog();
 			await play();
 		}, delay);
@@ -224,8 +267,16 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: { autoplay?: Re
 		// while the stream was unhealthy) the connection is dead or the buffer old: reload so the
 		// live stream restarts from "now".
 		const wasPausedLong = pausedAt > 0 && Date.now() - pausedAt > STALE_AFTER_PAUSE_MS;
-		if (element.error || wasPausedLong || reloadOnResume || phase.value === 'failed') {
-			element.load();
+		if (phase.value === 'failed') {
+			// Every attempt failed: start over with the primary server.
+			mirrorIndex = 0;
+			reloadStream({ nextMirror: false });
+		} else if (element.error) {
+			reloadStream({ nextMirror: true }); // this mirror is failing, try the next one
+		} else if (wasPausedLong || reloadOnResume) {
+			reloadStream({ nextMirror: false });
+		} else {
+			// Healthy and recently paused: simply continue.
 		}
 
 		cancelReconnect();
@@ -347,6 +398,26 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: { autoplay?: Re
 		},
 	};
 
+	// A new stream (channel switch) replaces the old one only after it was faded out, otherwise
+	// cutting a sounding stream clicks. The first source is applied at once.
+	let sourceToken = 0;
+	watch(
+		() => [audio.value, options.sources?.value] as const,
+		async ([element, urls]) => {
+			if (!element || !urls || urls.length === 0) return;
+			const token = ++sourceToken;
+			if (currentSource !== '') await duck();
+			if (token !== sourceToken) return; // a newer switch took over meanwhile
+
+			mirrorIndex = 0;
+			// Must be set before `src`: they decide whether loading starts and whether it autoplays.
+			element.autoplay = options.autoplay?.value ?? true;
+			element.preload = element.autoplay ? 'auto' : 'none';
+			setElementSource(element, urls[0]);
+		},
+		{ immediate: true },
+	);
+
 	return {
 		output,
 		isPlaying,
@@ -357,7 +428,6 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: { autoplay?: Re
 		resume,
 		pause,
 		toggle,
-		duck,
 		listeners,
 	};
 }

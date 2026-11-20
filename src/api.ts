@@ -83,7 +83,8 @@ export const api = {
 		return response.songs.filter((song) => isSong(song));
 	},
 
-	async getStreamUrl(playlistUrl: string, signal?: AbortSignal) {
+	/** All stream URLs of a playlist: SomaFM lists several mirror servers (File1..FileN). */
+	async getStreamUrls(playlistUrl: string, signal?: AbortSignal) {
 		const playlist: string = await useApi({
 			baseUrl: '',
 			url: toTrustedHttpsUrl(playlistUrl),
@@ -91,12 +92,22 @@ export const api = {
 			responseHandler: 'text',
 			signal,
 		});
-		const streamLine = playlist
-			.split(/\r?\n/)
-			.map((line) => line.trim())
-			.find((line) => /^(?:[^=]+=)?https?:\/\//.test(line));
-		if (!streamLine) throw new Error('Stream URL not found in playlist');
-		return toTrustedHttpsUrl(streamLine.slice(streamLine.search(/https?:\/\//)));
+
+		const urls: string[] = [];
+		let firstError: Error | undefined;
+		for (const line of playlist.split(/\r?\n/)) {
+			const entry = line.trim();
+			if (!/^(?:[^=]+=)?https?:\/\//.test(entry)) continue;
+			try {
+				const url = toTrustedHttpsUrl(entry.slice(entry.search(/https?:\/\//)));
+				if (!urls.includes(url)) urls.push(url);
+			} catch (error) {
+				firstError ??= error as Error;
+			}
+		}
+		// Mirrors on untrusted hosts are skipped; only fail when nothing usable is left.
+		if (urls.length === 0) throw firstError ?? new Error('Stream URL not found in playlist');
+		return urls;
 	},
 };
 

@@ -14,14 +14,14 @@ const mainStore = useMainStore();
 		<p v-if="mainStore.channelError" class="error" role="alert">{{ mainStore.channelError }}</p>
 		<p v-else-if="mainStore.channelLoading" class="error loading" role="status">Loading channel…</p>
 		<AppTransition name="fade">
-			<div v-if="!mainStore.streamUrl" class="title">
+			<div v-if="mainStore.streamUrls.length === 0" class="title">
 				<h1>SomaFM Radio</h1>
 				<h2>somafm.com</h2>
 				<h3>Choose a channel</h3>
 			</div>
 		</AppTransition>
 		<AppTransition name="fade">
-			<div v-if="mainStore.streamUrl" class="main">
+			<div v-if="mainStore.streamUrls.length > 0" class="main">
 				<AppImage
 					class="channel-image"
 					:src="mainStore.currentChannel!.xlimage"
@@ -29,7 +29,7 @@ const mainStore = useMainStore();
 					:preloader-size-percent="60"
 				/>
 				<AudiPlayerChannelInfo />
-				<AudioPlayerElement :src="mainStore.streamUrl" />
+				<AudioPlayerElement />
 			</div>
 		</AppTransition>
 	</AppContainer>
