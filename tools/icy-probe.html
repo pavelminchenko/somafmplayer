@@ -65,6 +65,7 @@
 		<p>
 			<button id="run" type="button">Проверить (до 40 с)</button>
 			<button id="stop" type="button" disabled>Остановить</button>
+			<button id="diagnose" type="button">Диагностика (какой запрос отклоняется)</button>
 		</p>
 
 		<h2>Итог</h2>
@@ -182,6 +183,15 @@
 					);
 					for (const [name, value] of response.headers) log(`           ${name}: ${value}`);
 
+					if (!response.ok) {
+						await response.body?.cancel();
+						verdict(
+							'bad',
+							`❌ Сервер ответил HTTP ${response.status} на запрос с Icy-MetaData. Читать метаданные из браузера нельзя (воспроизведение обычным плеером при этом может работать). Нажмите «Диагностика», чтобы увидеть, какой именно заголовок отклоняется.`,
+						);
+						return;
+					}
+
 					const headerValue = response.headers.get('icy-metaint');
 					const manual = Number.parseInt($('metaint').value, 10);
 					const metaint = headerValue ? Number.parseInt(headerValue, 10) : manual;
@@ -275,11 +285,75 @@
 				$('caps').textContent = lines.join('\n');
 			}
 
+			/** Sends the same request with different headers and reports which ones the server accepts. */
+			async function diagnose() {
+				$('log').textContent = '';
+				$('diagnose').disabled = true;
+				const url = $('url').value.trim();
+				const variants = [
+					['fetch без доп. заголовков', {}],
+					['fetch + Icy-MetaData: 1', { 'Icy-MetaData': '1' }],
+					['fetch + Range: bytes=0-', { Range: 'bytes=0-' }],
+					['fetch + Icy-MetaData + Range', { 'Icy-MetaData': '1', Range: 'bytes=0-' }],
+				];
+				const rows = [];
+				for (const [name, headers] of variants) {
+					const abort = new AbortController();
+					try {
+						const response = await fetch(url, { headers, signal: abort.signal });
+						rows.push(
+							`${name.padEnd(32)} -> HTTP ${response.status}${response.headers.get('icy-metaint') ? `, icy-metaint=${response.headers.get('icy-metaint')}` : ''}`,
+						);
+						abort.abort();
+					} catch (error) {
+						rows.push(`${name.padEnd(32)} -> ошибка: ${error.message}`);
+					}
+				}
+
+				// Control: what a normal <audio> element gets (this is how the player plays).
+				const audio = new Audio();
+				audio.crossOrigin = 'anonymous';
+				audio.volume = 0;
+				audio.src = url;
+				const outcome = await new Promise((resolve) => {
+					audio.addEventListener('playing', () => resolve('играет (HTTP 200)'), { once: true });
+					audio.addEventListener(
+						'error',
+						() => resolve(`ошибка загрузки (код ${audio.error?.code})`),
+						{ once: true },
+					);
+					audio.play().catch(() => {});
+					setTimeout(() => resolve('нет ответа за 10 с'), 10000);
+				});
+				audio.pause();
+				audio.removeAttribute('src');
+				audio.load();
+				rows.push(`${'<audio crossorigin> (как в плеере)'.padEnd(32)} -> ${outcome}`);
+
+				log(rows.join('\n'));
+				const blocked = rows.slice(0, 4).filter((row) => /HTTP 4\d\d/.test(row)).length;
+				if (/играет/.test(outcome) && blocked > 0) {
+					verdict(
+						'bad',
+						'❌ Обычное воспроизведение работает, а запросы через fetch (по крайней мере часть вариантов) сервер отклоняет. Читать метаданные из браузера, скорее всего, нельзя. Смотрите таблицу ниже.',
+					);
+				} else if (blocked === 0) {
+					verdict('ok', '✅ Все варианты приняты. Запустите основную проверку ещё раз.');
+				} else {
+					verdict(
+						'warn',
+						'⚠️ Отклоняется и обычное воспроизведение (возможно, блокировка по сети/IP). Смотрите таблицу ниже.',
+					);
+				}
+				$('diagnose').disabled = false;
+			}
+
 			$('run').addEventListener('click', () => {
 				verdict('warn', 'Идёт проверка...', false);
 				run();
 			});
 			$('stop').addEventListener('click', () => controller.abort());
+			$('diagnose').addEventListener('click', diagnose);
 			capabilities();
 		</script>
 	</body>
