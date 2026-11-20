@@ -50,6 +50,23 @@ describe('setCurrentChannel', () => {
 		expect(store.channelLoading).toBe(false);
 	});
 
+	it('records when the songs were loaded', async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+		mocked.getStreamUrl.mockResolvedValue('https://ice1.somafm.com/a');
+		mocked.getChannelSongs.mockResolvedValue([song('One')]);
+		const store = useMainStore();
+		expect(store.songsUpdatedAt).toBe(0);
+
+		await store.setCurrentChannel(makeChannel('a'));
+		expect(store.songsUpdatedAt).toBe(Date.now());
+
+		vi.advanceTimersByTime(15000);
+		await store.refreshCurrentSongs();
+		expect(store.songsUpdatedAt).toBe(Date.now());
+		vi.useRealTimers();
+	});
+
 	it('keeps the previous channel untouched while the next one is loading', async () => {
 		mocked.getStreamUrl.mockResolvedValueOnce('https://ice1.somafm.com/a');
 		mocked.getChannelSongs.mockResolvedValueOnce([song('A song')]);
@@ -378,5 +395,108 @@ describe('selectAdjacentChannel', () => {
 		await store.selectAdjacentChannel(1);
 		expect(store.currentChannel).toBeNull();
 		expect(mocked.getStreamUrl).not.toHaveBeenCalled();
+	});
+});
+
+function ready(data: Map<string, string>, ...ids: string[]) {
+	mocked.getChannels.mockResolvedValue(ids.map((id) => makeChannel(id)));
+	mocked.getStreamUrl.mockResolvedValue('https://ice1.somafm.com/x');
+	mocked.getChannelSongs.mockResolvedValue([]);
+	return data;
+}
+
+describe('last selected channel', () => {
+	const LAST_KEY = 'somafm-player:last-channel';
+
+	it('remembers the channel the user selected', async () => {
+		const data = stubStorage();
+		mocked.getStreamUrl.mockResolvedValue('https://ice1.somafm.com/x');
+		mocked.getChannelSongs.mockResolvedValue([]);
+
+		await useMainStore().setCurrentChannel(makeChannel('b'));
+
+		expect(data.get(LAST_KEY)).toBe('b');
+	});
+
+	it('does not remember a channel that failed to load', async () => {
+		const data = stubStorage();
+		mocked.getStreamUrl.mockRejectedValue(new Error('boom'));
+		mocked.getChannelSongs.mockResolvedValue([]);
+
+		await useMainStore().setCurrentChannel(makeChannel('b'));
+
+		expect(data.has(LAST_KEY)).toBe(false);
+	});
+
+	it('restores it after the channels loaded, without autoplay', async () => {
+		ready(stubStorage({ [LAST_KEY]: 'b' }), 'a', 'b', 'c');
+		const store = useMainStore();
+
+		await store.loadChannels();
+
+		expect(store.currentChannel?.id).toBe('b');
+		expect(store.streamUrl).toBe('https://ice1.somafm.com/x');
+		expect(store.autoplay).toBe(false);
+	});
+
+	it('autoplays again once the user picks a channel', async () => {
+		ready(stubStorage({ [LAST_KEY]: 'b' }), 'a', 'b');
+		const store = useMainStore();
+		await store.loadChannels();
+
+		await store.setCurrentChannel(makeChannel('a'));
+
+		expect(store.autoplay).toBe(true);
+		expect(store.currentChannel?.id).toBe('a');
+	});
+
+	it('shows the cached list at once and restores in the background', async () => {
+		stubStorage({
+			[LAST_KEY]: 'b',
+			'somafm-player:channels': JSON.stringify([makeChannel('a'), makeChannel('b')]),
+		});
+		mocked.getChannels.mockReturnValue(deferred<ChannelSummary[]>().promise); // the network never answers
+		mocked.getStreamUrl.mockResolvedValue('https://ice1.somafm.com/x');
+		mocked.getChannelSongs.mockResolvedValue([]);
+		const store = useMainStore();
+
+		await store.loadChannels();
+		expect(store.channels).toHaveLength(2);
+
+		await vi.waitFor(() => {
+			expect(store.currentChannel?.id).toBe('b');
+		});
+	});
+
+	it('ignores an unknown stored id', async () => {
+		ready(stubStorage({ [LAST_KEY]: 'gone' }), 'a', 'b');
+		const store = useMainStore();
+
+		await store.loadChannels();
+
+		expect(store.currentChannel).toBeNull();
+		expect(mocked.getStreamUrl).not.toHaveBeenCalled();
+	});
+
+	it('does not override a channel the user already chose', async () => {
+		ready(stubStorage({ [LAST_KEY]: 'b' }), 'a', 'b');
+		const store = useMainStore();
+		await store.setCurrentChannel(makeChannel('a'));
+
+		await store.restoreLastChannel();
+
+		expect(store.currentChannel?.id).toBe('a');
+	});
+
+	it('fails silently when the restored channel cannot be loaded', async () => {
+		ready(stubStorage({ [LAST_KEY]: 'b' }), 'a', 'b');
+		mocked.getStreamUrl.mockRejectedValue(new Error('boom'));
+		const store = useMainStore();
+
+		await store.loadChannels();
+
+		expect(store.currentChannel).toBeNull();
+		expect(store.channelError).toBe('');
+		expect(store.requestedChannelId).toBe('');
 	});
 });

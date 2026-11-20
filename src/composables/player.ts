@@ -34,7 +34,7 @@ function normalizeVolume(value: number) {
  *
  * Bind `listeners` to the element with `v-on`, and drive playback with `resume`/`pause`/`toggle`.
  */
-function usePlayer(audio: Ref<HTMLAudioElement | null>) {
+function usePlayer(audio: Ref<HTMLAudioElement | null>, options: { autoplay?: Ref<boolean> } = {}) {
 	const phase = ref<Phase>('idle');
 	const errorMessage = ref('');
 	const reconnectAttempt = ref(0);
@@ -104,6 +104,8 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>) {
 
 	// Set when the user pauses on purpose, so nothing resumes playback behind their back.
 	let pausedByUser = false;
+	// Once the user pressed Play, later (re)loads must start playing even for a restored channel.
+	let userStarted = false;
 	let pausedAt = 0;
 	// The stream was not healthy when paused, so resuming must reconnect instead of continuing.
 	let reloadOnResume = false;
@@ -227,6 +229,7 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>) {
 		}
 
 		cancelReconnect();
+		userStarted = true;
 		cancelPendingPause();
 		// Resumed during the fade-out of a pause: the element is still playing, bring the sound back.
 		if (!element.paused) setEnvelope(1);
@@ -294,6 +297,12 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>) {
 			cancelReconnect();
 			reconnectAttempt.value = 0;
 			errorMessage.value = '';
+			if (options.autoplay?.value === false && !userStarted) {
+				// A channel restored after a reload: ready, but waiting for the Play button.
+				pausedByUser = true;
+				phase.value = 'paused';
+				return;
+			}
 			phase.value = 'connecting';
 			startWatchdog();
 		},

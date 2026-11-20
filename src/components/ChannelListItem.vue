@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, ref, watch } from 'vue';
 import AppImage from '@/components/AppImage.vue';
 import { useMainStore } from '@/stores/main-store';
 import type { ChannelSummary } from '@/types';
@@ -9,16 +10,25 @@ const props = defineProps<{
 
 const mainStore = useMainStore();
 
+const item = ref<HTMLElement | null>(null);
+const isCurrent = computed(() => props.data.id === mainStore.currentChannel?.id);
+
+// A channel restored after a reload may sit far down the list.
+watch(
+	isCurrent,
+	(current) => {
+		if (current) item.value?.scrollIntoView({ block: 'nearest' });
+	},
+	{ flush: 'post', immediate: true },
+);
+
 const setCurrentChannel = async () => {
 	await mainStore.setCurrentChannel(props.data);
 };
 </script>
 
 <template>
-	<li
-		class="channel-list-item"
-		:class="{ current: props.data.id === mainStore.currentChannel?.id }"
-	>
+	<li ref="item" class="channel-list-item" :class="{ current: isCurrent }">
 		<div class="inner">
 			<!-- Decorative: the channel title is right next to it. -->
 			<AppImage :src="props.data.image" alt="" />
@@ -29,7 +39,7 @@ const setCurrentChannel = async () => {
 			<button
 				type="button"
 				class="channel-button"
-				:aria-current="props.data.id === mainStore.currentChannel?.id || undefined"
+				:aria-current="isCurrent || undefined"
 				@click="setCurrentChannel"
 			>
 				Play {{ props.data.title }}

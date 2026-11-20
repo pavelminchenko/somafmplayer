@@ -521,6 +521,52 @@ function stubWebAudio() {
 	return { gain, node, destination, close, resume, lastTarget };
 }
 
+function setupRestored() {
+	const audio = makeAudio();
+	const element = ref(audio as unknown as HTMLAudioElement);
+	const scope = effectScope();
+	const player = scope.run(() => usePlayer(element, { autoplay: ref(false) }));
+	if (!player) throw new Error('usePlayer did not run');
+	return { audio, player };
+}
+
+describe('usePlayer with a restored channel (autoplay off)', () => {
+	it('stays paused and quiet when the stream is set, and never auto-starts', async () => {
+		vi.useFakeTimers();
+		const { audio, player } = setupRestored();
+
+		player.listeners.loadstart();
+		await player.listeners.canplay();
+		vi.advanceTimersByTime(60000);
+
+		expect(player.isPlaying.value).toBe(false);
+		expect(player.statusMessage.value).toBe('');
+		expect(audio.play).not.toHaveBeenCalled();
+		expect(audio.load).not.toHaveBeenCalled(); // no watchdog, no reconnect attempts
+	});
+
+	it('plays without reloading when the user presses Play', async () => {
+		const { audio, player } = setupRestored();
+		player.listeners.loadstart();
+
+		await player.toggle();
+
+		expect(audio.play).toHaveBeenCalledOnce();
+		expect(audio.load).not.toHaveBeenCalled();
+		expect(player.statusMessage.value).toBe('Connecting…');
+	});
+
+	it('treats later reloads as wanted playback once the user has started', async () => {
+		const { player } = setupRestored();
+		player.listeners.loadstart();
+		await player.toggle(); // the user starts
+
+		player.listeners.loadstart(); // e.g. a reload after an error
+
+		expect(player.statusMessage.value).toBe('Connecting…');
+	});
+});
+
 describe('usePlayer click-free level changes (Web Audio)', () => {
 	it('routes the element through a GainNode and leaves the element volume at 1', async () => {
 		const web = stubWebAudio();

@@ -1,22 +1,13 @@
 <script setup lang="ts">
-import { useDocumentVisibility, useIntervalFn } from '@vueuse/core';
 import { computed } from 'vue';
 import { useMainStore } from '@/stores/main-store';
 
-const SONGS_REFRESH_INTERVAL = 15000;
-
 const mainStore = useMainStore();
-const visibility = useDocumentVisibility();
 
 const currentSongInfo = computed(() => {
 	const song = mainStore.currentChannel?.songs[0];
 	return song ? `${song.artist} - ${song.title}` : '';
 });
-
-// Stopped automatically on unmount; skipped while the tab is hidden.
-useIntervalFn(async () => {
-	if (visibility.value === 'visible') await mainStore.refreshCurrentSongs();
-}, SONGS_REFRESH_INTERVAL);
 </script>
 
 <template>

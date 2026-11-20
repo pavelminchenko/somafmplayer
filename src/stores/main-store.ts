@@ -3,6 +3,7 @@ import { api, isChannelSummary } from '@/api.ts';
 import { type Channel, type ChannelSummary, type Song } from '@/types.ts';
 
 const CHANNELS_CACHE_KEY = 'somafm-player:channels';
+const LAST_CHANNEL_KEY = 'somafm-player:last-channel';
 
 let channelRequest: AbortController | undefined;
 
@@ -23,6 +24,22 @@ function writeCachedChannels(channels: ChannelSummary[]) {
 	}
 }
 
+function readLastChannelId() {
+	try {
+		return localStorage.getItem(LAST_CHANNEL_KEY) ?? '';
+	} catch {
+		return '';
+	}
+}
+
+function writeLastChannelId(id: string) {
+	try {
+		localStorage.setItem(LAST_CHANNEL_KEY, id);
+	} catch {
+		// Storage is full or unavailable (private mode): remembering the channel is optional.
+	}
+}
+
 function getErrorMessage(error: unknown) {
 	return error instanceof Error ? error.message : String(error);
 }
@@ -39,6 +56,11 @@ export const useMainStore = defineStore('main-store', {
 		channelLoading: false,
 		channelError: '',
 		streamUrl: '',
+		// When the current channel's songs were last loaded (ms since epoch; 0 = never).
+		songsUpdatedAt: 0,
+		// False for a channel restored after a reload: browsers block autoplay without a user gesture,
+		// so it is prepared and waits for the Play button.
+		autoplay: true,
 	}),
 
 	actions: {
@@ -53,6 +75,25 @@ export const useMainStore = defineStore('main-store', {
 
 			const refresh = this.refreshChannels();
 			if (cached.length === 0) await refresh;
+
+			// Not awaited: the list is usable right away, the channel appears when it has loaded.
+			const restore = this.restoreLastChannel();
+			if (cached.length === 0) await restore;
+		},
+
+		/** Prepares the channel that was selected before the page was reloaded (without playing it). */
+		async restoreLastChannel() {
+			if (this.currentChannel || this.requestedChannelId) return; // the user already chose
+			const id = readLastChannelId();
+			const channel = this.channels.find((item) => item.id === id);
+			if (!channel) return;
+
+			await this.setCurrentChannel(channel, { autoplay: false });
+			if (this.channelError && this.requestedChannelId === channel.id) {
+				// A silent restore must not greet the user with an error.
+				this.channelError = '';
+				this.requestedChannelId = '';
+			}
 		},
 
 		async refreshChannels() {
@@ -66,7 +107,7 @@ export const useMainStore = defineStore('main-store', {
 			}
 		},
 
-		async setCurrentChannel(channel: ChannelSummary) {
+		async setCurrentChannel(channel: ChannelSummary, { autoplay = true } = {}) {
 			const isCurrent = this.currentChannel?.id === channel.id && !this.channelError;
 			// Already playing/loading this channel: nothing to do.
 			if (this.requestedChannelId === channel.id && (isCurrent || this.channelLoading)) return;
@@ -109,7 +150,10 @@ export const useMainStore = defineStore('main-store', {
 
 				// Commit everything at once so the title, songs and stream never diverge.
 				this.currentChannel = { ...channel, songs };
+				this.songsUpdatedAt = Date.now();
 				this.streamUrl = streamUrl;
+				this.autoplay = autoplay;
+				writeLastChannelId(channel.id);
 			} catch (error) {
 				if (signal.aborted) return;
 				this.channelError = getErrorMessage(error);
@@ -136,7 +180,10 @@ export const useMainStore = defineStore('main-store', {
 			try {
 				const songs = await api.getChannelSongs(channel.id);
 				// The user may have switched channels while the request was in flight.
-				if (this.currentChannel?.id === channel.id) this.currentChannel.songs = songs;
+				if (this.currentChannel?.id === channel.id) {
+					this.currentChannel.songs = songs;
+					this.songsUpdatedAt = Date.now();
+				}
 			} catch {
 				// Transient polling errors are ignored; the next tick retries.
 			}

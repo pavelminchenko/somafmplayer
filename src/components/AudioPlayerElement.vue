@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import AudioPlayerElementControls from '@/components/AudioPlayerElementControls.vue';
 import AudioPlayerElementVisualizer from '@/components/AudioPlayerElementVisualizer.vue';
 import { useMediaSession } from '@/composables/media-session';
 import { usePlayer } from '@/composables/player';
+import { useSongRefresh } from '@/composables/song-refresh';
 import { useMainStore } from '@/stores/main-store';
 
 const props = defineProps<{ src: string }>();
 
+const mainStore = useMainStore();
 const audio = ref<HTMLAudioElement | null>(null);
 const {
 	output,
@@ -21,7 +23,7 @@ const {
 	toggle,
 	duck,
 	listeners,
-} = usePlayer(audio);
+} = usePlayer(audio, { autoplay: computed(() => mainStore.autoplay) });
 
 // The element is pointed at a new stream only after the old one was faded out, otherwise
 // replacing a sounding stream cuts the waveform and clicks.
@@ -34,7 +36,7 @@ watch(
 	},
 );
 
-const mainStore = useMainStore();
+useSongRefresh(isPlaying);
 useMediaSession(isPlaying, {
 	play: resume,
 	pause,
@@ -48,8 +50,9 @@ useMediaSession(isPlaying, {
 		<audio
 			v-show="false"
 			ref="audio"
+			:autoplay="mainStore.autoplay"
+			:preload="mainStore.autoplay ? 'auto' : 'none'"
 			:src="currentSrc"
-			autoplay
 			crossorigin="anonymous"
 			v-on="listeners"
 		></audio>
