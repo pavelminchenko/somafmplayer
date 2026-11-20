@@ -732,6 +732,16 @@ describe('usePlayer MSE transport', () => {
 		expect(player.errorMessage.value).toBe('');
 	});
 
+	it('forgets the stream title on fallback so API polling can take over', () => {
+		const { player, callbacks } = setupMse();
+		player.listeners.loadstart();
+		callbacks().onTitle('Artist - Song'); // MSE delivered a title but never any sound
+
+		callbacks().onLost('decode');
+
+		expect(player.liveTitle.value).toBe('');
+	});
+
 	it('falls back for any failure while MSE has never produced sound (e.g. CORS)', () => {
 		const { audio, player, callbacks } = setupMse();
 		player.listeners.loadstart();
@@ -739,6 +749,35 @@ describe('usePlayer MSE transport', () => {
 		callbacks().onLost('network');
 
 		expect(audio.src).toBe(MIRRORS[0]);
+	});
+
+	it('falls back when MSE gives no sound before the connect timeout (a silent failure)', () => {
+		const { audio, player, transport } = setupMse();
+		player.listeners.loadstart(); // MSE attached, but nothing ever plays and no error event comes
+
+		vi.advanceTimersByTime(11000); // the connection watchdog fires
+
+		expect(transport.close).toHaveBeenCalledOnce();
+		expect(audio.src).toBe(MIRRORS[0]); // the element plays the same URL itself
+		expect(player.statusMessage.value).toBe('Connecting…'); // not a counted reconnect attempt
+	});
+
+	it('falls back when the element reports a decoder error before any sound', () => {
+		const { audio, player } = setupMse();
+		player.listeners.loadstart();
+
+		player.listeners.error();
+
+		expect(audio.src).toBe(MIRRORS[0]);
+	});
+
+	it('does not fall back for a watchdog loss once MSE has played (normal reconnect)', () => {
+		const { player, transport } = setupMse();
+		startPlaying(player);
+
+		vi.advanceTimersByTime(8000); // the stream stalls
+		expect(player.statusMessage.value).toContain('Reconnecting');
+		expect(transport.close).not.toHaveBeenCalled();
 	});
 
 	it('after the fallback the element transport handles reconnects as before', () => {

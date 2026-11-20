@@ -292,6 +292,8 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: PlayerOptions =
 	function fallbackToElement() {
 		transport.close();
 		transport = createElementTransport(getElement);
+		// The element reads no titles: whatever MSE delivered would go stale and keep API polling off.
+		liveTitle.value = '';
 		if (!currentSource) return;
 		if (pausedByUser) {
 			reloadOnResume = true;
@@ -307,6 +309,13 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: PlayerOptions =
 	/** The stream died (error event, premature end or a stalled connection). */
 	function connectionLost() {
 		stopWatchdog();
+		if (transport.kind === 'mse' && !mseEverPlayed && !pausedByUser) {
+			// MSE gave no sound at all (a silent failure raises no error event): use the proven path
+			// instead of burning reconnect attempts on a transport that does not work here.
+			// eslint-disable-next-line @typescript-eslint/no-use-before-define
+			fallbackToElement();
+			return;
+		}
 		if (pausedByUser) {
 			reloadOnResume = true; // the stream died while paused: resuming must reconnect
 			return;

@@ -119,19 +119,26 @@ function createMseTransport(
 }
 
 /**
- * Which transport the user asked for. `?transport=mse` / `?transport=audio` in the address
- * switches it and is remembered; the default stays on the proven `<audio src>` path.
+ * Which transport to use. MSE (track titles from the stream) is the default wherever the standard
+ * MediaSource can play MP3; `?transport=audio` turns it off (remembered), `?transport=mse` turns
+ * it back on. Everywhere else, and outside a browser, the proven `<audio src>` path is used.
  */
 const TRANSPORT_KEY = 'somafm-player:transport';
+
+function mseAvailable() {
+	const { MediaSource: Source } = globalThis as { MediaSource?: typeof MediaSource };
+	return Source?.isTypeSupported('audio/mpeg') ?? false;
+}
 
 function readTransportPreference(): TransportKind {
 	try {
 		const requested = new URLSearchParams(globalThis.location.search).get('transport');
 		if (requested === 'mse' || requested === 'audio') {
 			localStorage.setItem(TRANSPORT_KEY, requested);
-			return requested === 'mse' ? 'mse' : 'element';
 		}
-		return localStorage.getItem(TRANSPORT_KEY) === 'mse' ? 'mse' : 'element';
+		const choice = requested ?? localStorage.getItem(TRANSPORT_KEY);
+		if (choice === 'audio') return 'element';
+		return mseAvailable() ? 'mse' : 'element';
 	} catch {
 		return 'element'; // no location / storage (tests, private mode)
 	}

@@ -139,7 +139,8 @@ describe('mse transport', () => {
 	});
 });
 
-function stubBrowser(search: string, stored: Record<string, string> = {}) {
+/** A browser with (or without) standard MediaSource MP3 support. */
+function stubBrowser(search: string, stored: Record<string, string> = {}, mse = true) {
 	const store = new Map(Object.entries(stored));
 	vi.stubGlobal('location', { search });
 	vi.stubGlobal('localStorage', {
@@ -148,33 +149,45 @@ function stubBrowser(search: string, stored: Record<string, string> = {}) {
 			store.set(key, value);
 		},
 	});
+	if (mse) vi.stubGlobal('MediaSource', { isTypeSupported: () => true });
 	return store;
 }
 
 describe('readTransportPreference', () => {
-	it('defaults to the element transport', () => {
+	it('uses MSE by default where the standard MediaSource can play MP3', () => {
 		stubBrowser('');
+		expect(readTransportPreference()).toBe('mse');
+	});
+
+	it('uses the plain element where MediaSource is missing (e.g. iPhone) or cannot play MP3', () => {
+		stubBrowser('', {}, false);
+		expect(readTransportPreference()).toBe('element');
+
+		vi.stubGlobal('MediaSource', { isTypeSupported: () => false });
 		expect(readTransportPreference()).toBe('element');
 	});
 
-	it('?transport=mse switches to MSE and remembers it', () => {
-		const store = stubBrowser('?transport=mse');
-		expect(readTransportPreference()).toBe('mse');
-		expect(store.get('somafm-player:transport')).toBe('mse');
+	it('?transport=audio turns MSE off and remembers it', () => {
+		const store = stubBrowser('?transport=audio');
+		expect(readTransportPreference()).toBe('element');
+		expect(store.get('somafm-player:transport')).toBe('audio');
 
 		vi.stubGlobal('location', { search: '' });
-		expect(readTransportPreference()).toBe('mse'); // remembered
+		expect(readTransportPreference()).toBe('element'); // remembered
 	});
 
-	it('?transport=audio switches back', () => {
-		stubBrowser('?transport=audio', { 'somafm-player:transport': 'mse' });
-		expect(readTransportPreference()).toBe('element');
+	it('?transport=mse turns it back on', () => {
+		stubBrowser('?transport=mse', { 'somafm-player:transport': 'audio' });
+		expect(readTransportPreference()).toBe('mse');
 	});
 
-	it('ignores unknown values and a broken environment', () => {
+	it('ignores unknown values', () => {
 		stubBrowser('?transport=banana');
-		expect(readTransportPreference()).toBe('element');
+		expect(readTransportPreference()).toBe('mse');
+	});
+
+	it('uses the element outside a browser (no location / storage)', () => {
 		vi.unstubAllGlobals();
-		expect(readTransportPreference()).toBe('element'); // no location / storage in Node
+		expect(readTransportPreference()).toBe('element');
 	});
 });
