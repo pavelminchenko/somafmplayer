@@ -15,8 +15,7 @@ const ACTIVE_PHASES = new Set<Phase>(['connecting', 'playing', 'buffering', 'rec
 // element just stops advancing): keep retrying (1 s, 2 s, 4 s, 8 s, then every 8 s) for a minute
 // before giving up, so a short outage is simply waited out.
 const RECONNECT_BUDGET_MS = 60000;
-const RECONNECT_BASE_DELAY_MS = 1000;
-const RECONNECT_MAX_DELAY_MS = 8000;
+const RECONNECT_INTERVAL_MS = 10000;
 // No progress for this long while playing/buffering means the connection is gone.
 const STALL_TIMEOUT_MS = 6000;
 // ... and for this long while (re)connecting.
@@ -62,8 +61,7 @@ function usePlayer(audio: Ref<HTMLAudioElement | null>, options: PlayerOptions =
 	const level = useLevelControl(audio);
 	const reconnector = createReconnector({
 		budgetMs: RECONNECT_BUDGET_MS,
-		baseDelayMs: RECONNECT_BASE_DELAY_MS,
-		maxDelayMs: RECONNECT_MAX_DELAY_MS,
+		intervalMs: RECONNECT_INTERVAL_MS,
 	});
 
 	// "Playing" from the user's point of view: sound is on the way, a click means "pause/cancel".

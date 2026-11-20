@@ -112,21 +112,21 @@ describe('usePlayer status', () => {
 });
 
 describe('usePlayer automatic reconnect', () => {
-	it('shows "Connecting…" and retries with backoff: 1 s, 2 s, 4 s, 8 s, then every 8 s', () => {
+	it('shows "Connecting…" and retries every 10 s', () => {
 		const { audio, player } = setupWithTimers();
 		startPlaying(player);
 
 		player.listeners.error();
 		expect(player.isPlaying.value).toBe(true);
 		expect(player.statusMessage.value).toBe('Connecting…');
-		vi.advanceTimersByTime(999);
+		vi.advanceTimersByTime(9999);
 		expect(audio.load).not.toHaveBeenCalled();
 		vi.advanceTimersByTime(1);
 		expect(audio.load).toHaveBeenCalledTimes(1);
 		expect(audio.play).toHaveBeenCalledTimes(1);
 		player.listeners.loadstart(); // our own reload
 
-		const waits = [2000, 4000, 8000, 8000, 8000];
+		const waits = [10000, 10000, 10000, 10000];
 		waits.forEach((wait, index) => {
 			player.listeners.error();
 			expect(player.statusMessage.value).toBe('Connecting…'); // a retry looks like the first connection
@@ -144,14 +144,14 @@ describe('usePlayer automatic reconnect', () => {
 
 		const lose = (reloaded = true) => {
 			player.listeners.error();
-			vi.advanceTimersByTime(8000);
+			vi.advanceTimersByTime(10000);
 			if (reloaded) player.listeners.loadstart(); // a retry reloaded the stream
 		};
-		for (let round = 0; round < 8; round++) lose(); // the last one starts at 56 s: still within the minute
+		for (let round = 0; round < 6; round++) lose(); // the last loss is at 50 s: still within the minute
 		expect(player.errorMessage.value).toBe('');
 		expect(player.statusMessage.value).toBe('Connecting…');
 
-		lose(false); // 64 s since the first loss: the minute is over, no retry is scheduled
+		lose(false); // 60 s since the first loss: the minute is over, no retry is scheduled
 		expect(player.errorMessage.value).toContain(FAILED);
 		expect(player.statusMessage.value).toBe('');
 		expect(player.isPlaying.value).toBe(false); // the button offers Play again
@@ -165,10 +165,10 @@ describe('usePlayer automatic reconnect', () => {
 		startPlaying(player);
 
 		player.listeners.error();
-		vi.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(10000);
 		player.listeners.loadstart();
 		player.listeners.error();
-		vi.advanceTimersByTime(2000);
+		vi.advanceTimersByTime(10000);
 		player.listeners.loadstart();
 		player.listeners.playing(); // the server is back
 
@@ -183,24 +183,24 @@ describe('usePlayer automatic reconnect', () => {
 		startPlaying(player);
 
 		player.listeners.ended();
-		vi.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(10000);
 
 		expect(audio.load).toHaveBeenCalledOnce();
 	});
 
-	it('resets the backoff and the message once playback is back', () => {
+	it('resets the budget and the message once playback is back', () => {
 		const { audio, player } = setupWithTimers();
 		startPlaying(player);
 		player.listeners.error();
-		vi.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(10000);
 		player.listeners.loadstart();
 
 		player.listeners.playing();
 		expect(player.statusMessage.value).toBe('');
 		expect(player.errorMessage.value).toBe('');
 
-		player.listeners.error(); // a later drop starts again at 1 s
-		vi.advanceTimersByTime(1000);
+		player.listeners.error(); // a later drop gets a fresh minute
+		vi.advanceTimersByTime(10000);
 		expect(audio.load).toHaveBeenCalledTimes(2);
 	});
 
@@ -231,7 +231,7 @@ describe('usePlayer automatic reconnect', () => {
 		expect(player.statusMessage.value).toBe('Connecting…');
 
 		player.listeners.error();
-		vi.advanceTimersByTime(1000); // counter was reset: first retry after 1 s again
+		vi.advanceTimersByTime(10000); // the minute starts over
 		expect(audio.load).toHaveBeenCalledTimes(1);
 	});
 
@@ -567,17 +567,17 @@ describe('usePlayer mirror servers', () => {
 		startPlaying(player);
 
 		player.listeners.error();
-		vi.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(10000);
 		expect(audio.src).toBe(MIRRORS[1]);
 		player.listeners.loadstart();
 
 		player.listeners.error();
-		vi.advanceTimersByTime(2000);
+		vi.advanceTimersByTime(10000);
 		expect(audio.src).toBe(MIRRORS[2]);
 		player.listeners.loadstart();
 
 		player.listeners.error();
-		vi.advanceTimersByTime(4000);
+		vi.advanceTimersByTime(10000);
 		expect(audio.src).toBe(MIRRORS[3]);
 		expect(audio.load).not.toHaveBeenCalled(); // assigning src is what restarts the stream
 	});
@@ -588,17 +588,17 @@ describe('usePlayer mirror servers', () => {
 		startPlaying(player);
 
 		player.listeners.error();
-		vi.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(10000);
 		expect(audio.src).toBe(MIRRORS[1]); // the last server
 		player.listeners.loadstart();
 
 		player.listeners.error();
-		vi.advanceTimersByTime(2000);
+		vi.advanceTimersByTime(10000);
 		expect(audio.src).toBe(MIRRORS[0]); // back to the first one
 		player.listeners.loadstart();
 
 		player.listeners.error();
-		vi.advanceTimersByTime(4000);
+		vi.advanceTimersByTime(10000);
 		expect(audio.src).toBe(MIRRORS[1]);
 	});
 
@@ -608,7 +608,7 @@ describe('usePlayer mirror servers', () => {
 		startPlaying(player);
 
 		player.listeners.error();
-		vi.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(10000);
 
 		expect(audio.src).toBe(MIRRORS[0]);
 		expect(audio.load).toHaveBeenCalledOnce();
@@ -819,7 +819,7 @@ describe('usePlayer MSE transport', () => {
 		callbacks().onLost('network');
 		player.listeners.loadstart(); // the element started loading
 		player.listeners.error();
-		vi.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(10000);
 
 		expect(audio.src).toBe(MIRRORS[1]); // next mirror, through the element
 	});
@@ -890,7 +890,7 @@ describe('usePlayer MSE transport', () => {
 
 		callbacks().onLost('network');
 		expect(player.statusMessage.value).toBe('Connecting…');
-		vi.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(10000);
 
 		expect(transport.close).not.toHaveBeenCalled(); // no fallback
 		expect(transport.open).toHaveBeenCalledWith(MIRRORS[1], true);

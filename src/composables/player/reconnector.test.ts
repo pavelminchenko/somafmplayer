@@ -3,7 +3,7 @@ import { createReconnector } from '@/composables/player/reconnector';
 
 function setup() {
 	vi.useFakeTimers();
-	return createReconnector({ budgetMs: 60000, baseDelayMs: 1000, maxDelayMs: 8000 });
+	return createReconnector({ budgetMs: 60000, intervalMs: 10000 });
 }
 
 afterEach(() => {
@@ -23,12 +23,12 @@ function nextDelay(reconnector: ReturnType<typeof setup>) {
 }
 
 describe('createReconnector', () => {
-	it('backs off 1 s, 2 s, 4 s, 8 s and then keeps retrying every 8 s', () => {
+	it('retries at a steady 10 s pace', () => {
 		const reconnector = setup();
 
-		const delays = Array.from({ length: 7 }, () => nextDelay(reconnector));
+		const delays = Array.from({ length: 4 }, () => nextDelay(reconnector));
 
-		expect(delays).toEqual([1000, 2000, 4000, 8000, 8000, 8000, 8000]);
+		expect(delays).toEqual([10000, 10000, 10000, 10000]);
 	});
 
 	it('reports exhaustion once the minute since the first failure is used up', () => {
@@ -38,29 +38,29 @@ describe('createReconnector', () => {
 		let scheduled = 0;
 		while (reconnector.schedule(run) === 'scheduled') {
 			scheduled++;
-			vi.advanceTimersByTime(8000); // also runs the retry
+			vi.advanceTimersByTime(10000); // also runs the retry
 			if (scheduled > 100) throw new Error('never gave up');
 		}
 
-		expect(scheduled).toBeGreaterThanOrEqual(8); // a minute of attempts, not three
+		expect(scheduled).toBe(6); // a minute of attempts, not three
 		expect(run).toHaveBeenCalledTimes(scheduled);
 		vi.advanceTimersByTime(120_000);
 		expect(run).toHaveBeenCalledTimes(scheduled);
 	});
 
-	it('cancel() drops a pending retry but keeps the backoff', () => {
+	it('cancel() drops a pending retry but keeps the budget', () => {
 		const reconnector = setup();
 		const run = vi.fn();
-		reconnector.schedule(run); // 1 s
+		reconnector.schedule(run);
 
 		reconnector.cancel();
 		vi.advanceTimersByTime(10000);
 		expect(run).not.toHaveBeenCalled();
 
-		expect(nextDelay(reconnector)).toBe(2000); // the next retry continues where it was
+		expect(nextDelay(reconnector)).toBe(10000);
 	});
 
-	it('reset() drops a pending retry and gives a fresh minute from the shortest delay', () => {
+	it('reset() drops a pending retry and gives a fresh minute', () => {
 		const reconnector = setup();
 		reconnector.schedule(vi.fn());
 		vi.advanceTimersByTime(90000); // long past the first minute
@@ -69,7 +69,7 @@ describe('createReconnector', () => {
 		reconnector.reset();
 		const run = vi.fn();
 		expect(reconnector.schedule(run)).toBe('scheduled');
-		vi.advanceTimersByTime(1000);
+		vi.advanceTimersByTime(10000);
 
 		expect(run).toHaveBeenCalledOnce();
 	});
