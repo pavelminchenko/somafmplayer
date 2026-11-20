@@ -284,8 +284,13 @@ PR #1 в `main` создавался по ошибке и закрыт; созд
 
 Предложения (не баги): `src/composables/player.ts` вырос до ~490 строк с шестью `eslint-disable
 no-use-before-define` (взаимная рекурсия сторож ↔ потеря связи ↔ переподключение); имеет смысл разделить на
-`usePlayerState` (фазы), `useReconnect`, `useWatchdog` и транспорт. Остальные устаревшие пакеты (vue-router 5,
+`usePlayerState` (фазы), `useReconnect`, `useWatchdog` и транспорт. Остальные устаревшие пакеты (
 ESLint 10 и др.) обновлять необязательно.
+
+**`vue-router` удалён** (по решению владельца: использовался только для одного маршрута и подгрузки единственного
+layout): `App.vue` отрисовывает `Layouts/Default` и `views/Home` напрямую, удалены `src/router/*`, тест
+`layout-middleware`, зависимость и правило ESLint для `router-view`. Побочный эффект: неизвестные адреса
+(`/foo`) больше не редиректятся на `/`, а показывают приложение; параметры (`?transport=`) читаются как раньше.
 
 ## Что осталось сделать
 
@@ -304,7 +309,7 @@ ESLint 10 и др.) обновлять необязательно.
    `npm run ncu` нужен ≥ 22.22.2). Если Vercel собирает на Node 20 — сменить
    версию Node в настройках проекта Vercel.
    Остальные пакеты можно обновлять по желанию (`npm run ncu`): ESLint 8→10,
-   Stylelint 16→18, Pinia 2→3/4, vue-router 4→5, TypeScript 5.9→6/7 и др. —
+   Stylelint 16→18, Pinia 2→3/4, TypeScript 5.9→6/7 и др. —
    это уже не про безопасность, а про актуальность.
 
 ### Приоритет 2: тесты (частично сделано)
@@ -338,7 +343,7 @@ ESLint 10 и др.) обновлять необязательно.
    (`src/lib/audio-visualizer.test.ts`): SHA-256 координат совпадает с хешем
    исходной JS-версии. Проверено в Chromium на реальном синусе: холст
    рисуется, звук идёт через `AudioContext`.
-7. ✅ `layout-middleware.ts`: `loadLayout` с `import.meta.glob`, типизированный
+7. ✅ (устарело: роутер удалён вовсе, см. ниже) `layout-middleware.ts`: `loadLayout` с `import.meta.glob`, типизированный
    `RouteMeta` (`layout`, `layoutComponent`), `markRaw`, тест.
 8. ✅ `preconnect` к `api.somafm.com` и кэш списка каналов (stale-while-revalidate,
    `localStorage`, ключ `somafm-player:channels`, форма проверяется): при повторном
@@ -391,6 +396,5 @@ src/
   components/                 AudioPlayer*, Channel*, App*
   lib/audio-visualizer.js     Web Audio API + canvas (без типов)
   views/Home.vue              главная страница
-  router/                     роуты и layout-middleware
 vercel.json                   CSP и заголовки безопасности
 ```

@@ -1,7 +1,10 @@
+<script setup lang="ts">
+import DefaultLayout from '@/layouts/Default.vue';
+import Home from '@/views/Home.vue';
+</script>
+
 <template>
-	<RouterView v-slot="{ Component, route }">
-		<component :is="route.meta.layoutComponent">
-			<component :is="Component" />
-		</component>
-	</RouterView>
+	<DefaultLayout>
+		<Home />
+	</DefaultLayout>
 </template>
