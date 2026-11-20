@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import AppContainer from '@/components/AppContainer.vue';
 import AppImage from '@/components/AppImage.vue';
 import AppTransition from '@/components/AppTransition.vue';
@@ -7,17 +8,32 @@ import AudioPlayerElement from '@/components/AudioPlayerElement.vue';
 import { useMainStore } from '@/stores/main-store';
 
 const mainStore = useMainStore();
+
+// The channel being opened (e.g. restored after a reload): its name and picture are known from the
+// list already, so the panel shows them instead of "Choose a channel" while the stream loads.
+const pendingChannel = computed(() =>
+	mainStore.channelLoading && mainStore.streamUrls.length === 0
+		? mainStore.channels.find(({ id }) => id === mainStore.requestedChannelId)
+		: undefined,
+);
 </script>
 
 <template>
 	<AppContainer class="audio-player">
 		<p v-if="mainStore.channelError" class="error" role="alert">{{ mainStore.channelError }}</p>
 		<p v-else-if="mainStore.channelLoading" class="error loading" role="status">Loading channel…</p>
+		<AppImage
+			v-if="pendingChannel"
+			class="pending-image"
+			:src="pendingChannel.xlimage"
+			alt=""
+			:preloader-size-percent="60"
+		/>
 		<AppTransition name="fade">
 			<div v-if="mainStore.streamUrls.length === 0" class="title">
 				<h1>SomaFM Radio</h1>
 				<h2>somafm.com</h2>
-				<h3>Choose a channel</h3>
+				<h3>{{ pendingChannel ? pendingChannel.title : 'Choose a channel' }}</h3>
 			</div>
 		</AppTransition>
 		<AppTransition name="fade">
@@ -64,6 +80,16 @@ const mainStore = useMainStore();
 
 .loading {
 	color: $color-secondary;
+}
+
+.pending-image {
+	position: absolute;
+	top: 0;
+	left: 0;
+	z-index: 0;
+	width: 100%;
+	height: 100%;
+	opacity: 0.1;
 }
 
 .title {
