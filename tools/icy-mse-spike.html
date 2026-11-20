@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="ru">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<!-- SomaFM rejects stream requests with a localhost Referer. -->
+		<meta name="referrer" content="no-referrer" />
+		<title>Спайк: ICY + MSE</title>
+		<style>
+			body {
+				max-width: 56rem;
+				margin: 1.5rem auto;
+				padding: 0 1rem;
+				font:
+					14px/1.45 system-ui,
+					sans-serif;
+			}
+			input[type='text'] {
+				width: 100%;
+				padding: 0.35rem;
+				font: inherit;
+			}
+			button {
+				padding: 0.35rem 0.9rem;
+				font: inherit;
+			}
+			pre,
+			textarea {
+				overflow: auto;
+				width: 100%;
+				padding: 0.6rem;
+				font:
+					12px/1.4 ui-monospace,
+					monospace;
+				background: #f3f3f3;
+				box-sizing: border-box;
+			}
+			.now {
+				margin: 0.5rem 0;
+				padding: 0.6rem;
+				font-size: 1.25rem;
+				background: #eef3ff;
+			}
+			.raw {
+				color: #666;
+				font-size: 0.85rem;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>Спайк: название трека из потока (ICY) через MSE</h1>
+		<p>
+			Один
+			<code>fetch</code>
+			с
+			<code>Icy-MetaData: 1</code>
+			: звук отдаётся в
+			<code>&lt;audio&gt;</code>
+			через
+			<code>MediaSource</code>
+			, названия вырезаются и показываются, когда трек зазвучал. Страница ничего не меняет в
+			приложении. Откройте через
+			<code>npm run dev</code>
+			:
+			<code>http://localhost:3000/tools/icy-mse-spike.html</code>
+			.
+		</p>
+
+		<label for="url">Адрес потока:</label>
+		<input id="url" type="text" value="https://ice4.somafm.com/deepspaceone-128-mp3" />
+		<p>
+			<button id="start" type="button">Старт</button>
+			<button id="stop" type="button" disabled>Стоп</button>
+			<button id="report" type="button">Отчёт</button>
+		</p>
+		<audio id="audio" controls></audio>
+
+		<div class="now">
+			Играет (в такт звуку):
+			<b id="shown">—</b>
+			<div class="raw">
+				Последнее из потока (приходит раньше звука):
+				<span id="raw">—</span>
+				· опережение:
+				<span id="lead">—</span>
+			</div>
+		</div>
+
+		<h3>Метрики (раз в секунду)</h3>
+		<pre id="stats"></pre>
+		<h3>События</h3>
+		<pre id="log" style="max-height: 14rem"></pre>
+		<h3>Отчёт (скопируйте и пришлите)</h3>
+		<textarea id="out" rows="14" readonly placeholder="Нажмите «Отчёт»"></textarea>
+
+		<script>
+			const $ = (id) => document.getElementById(id);
+			const audio = $('audio');
+
+			// ---- tunables of the experiment ----
+			const BATCH_BYTES = 32 * 1024; // coalesce small network chunks before appendBuffer
+			const BATCH_MS = 300;
+			const KEEP_BEHIND_S = 15; // trim everything older than this behind the playhead
+			const MAX_AHEAD_S = 25; // beyond this we are lagging behind the live edge: jump forward
+			const LIVE_MARGIN_S = 4;
+
+			const state = {};
+			function reset() {
+				Object.assign(state, {
+					startedAt: performance.now(),
+					bytesIn: 0,
+					bytesAppended: 0,
+					audioBytes: 0,
+					appends: 0,
+					trims: 0,
+					quotaErrors: 0,
+					jumps: 0,
+					waiting: 0,
+					stalled: 0,
+					maxAhead: 0,
+					metaBlocks: 0,
+					titles: [], // { title, arrivedAt, mediaTime, shownAt }
+					errors: [],
+					firstAudioAt: null,
+					endedBy: null,
+				});
+			}
+			reset();
+
+			let controller;
+			let mediaSource;
+			let sourceBuffer;
+			let queue = [];
+			let batch = [];
+			let batchSize = 0;
+			let batchTimer;
+			let timeline = []; // pending { time, entry }
+			let statsTimer;
+			let rafId;
+
+			function log(text) {
+				const t = ((performance.now() - state.startedAt) / 1000).toFixed(1).padStart(6);
+				const lines = $('log').textContent.split('\n').slice(-199);
+				lines.push(`${t}s  ${text}`);
+				$('log').textContent = lines.join('\n');
+				$('log').scrollTop = 1e9;
+			}
+
+			function fail(where, error) {
+				const message = `${where}: ${error?.name ?? ''} ${error?.message ?? error}`;
+				state.errors.push(message);
+				log('ОШИБКА ' + message);
+			}
+
+			const bufferedEnd = () =>
+				sourceBuffer && sourceBuffer.buffered.length
+					? sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1)
+					: 0;
+			const bufferedStart = () =>
+				sourceBuffer && sourceBuffer.buffered.length ? sourceBuffer.buffered.start(0) : 0;
+
+			// ---- ICY demultiplexer: metaint audio bytes, 1 length byte (x16), metadata, repeat ----
+			function createDemuxer(metaint, onAudio, onMetadata) {
+				let mode = 'audio';
+				let need = metaint;
+				let meta = [];
+				return (chunk) => {
+					let i = 0;
+					while (i < chunk.length) {
+						if (mode === 'audio') {
+							const n = Math.min(need, chunk.length - i);
+							onAudio(chunk.subarray(i, i + n));
+							i += n;
+							need -= n;
+							if (need === 0) mode = 'length';
+						} else if (mode === 'length') {
+							const length = chunk[i++] * 16;
+							if (length === 0) {
+								mode = 'audio';
+								need = metaint;
+							} else {
+								mode = 'meta';
+								need = length;
+								meta = [];
+							}
+						} else {
+							const n = Math.min(need, chunk.length - i);
+							for (let k = 0; k < n; k++) meta.push(chunk[i + k]);
+							i += n;
+							need -= n;
+							if (need === 0) {
+								onMetadata(new TextDecoder().decode(new Uint8Array(meta)).replace(/\0+$/, ''));
+								mode = 'audio';
+								need = metaint;
+							}
+						}
+					}
+				};
+			}
+
+			// ---- append queue ----
+			function pump() {
+				if (!sourceBuffer || sourceBuffer.updating || mediaSource?.readyState !== 'open') return;
+				const item = queue.shift();
+				if (!item) return;
+				if (item.marker) {
+					// Everything before this metadata block is appended: its media time is the buffered end.
+					item.entry.mediaTime = bufferedEnd();
+					timeline.push(item.entry);
+					pump();
+					return;
+				}
+				try {
+					sourceBuffer.appendBuffer(item.data);
+					state.appends++;
+					state.bytesAppended += item.data.length;
+				} catch (error) {
+					if (error.name === 'QuotaExceededError') {
+						state.quotaErrors++;
+						queue.unshift(item);
+						trim(true);
+					} else {
+						fail('appendBuffer', error);
+					}
+				}
+			}
+
+			function trim(force = false) {
+				if (!sourceBuffer || sourceBuffer.updating) return;
+				const start = bufferedStart();
+				const end = audio.currentTime - (force ? 5 : KEEP_BEHIND_S);
+				if (end - start > 1) {
+					try {
+						sourceBuffer.remove(start, end);
+						state.trims++;
+					} catch (error) {
+						fail('remove', error);
+					}
+				}
+			}
+
+			function onUpdateEnd() {
+				state.maxAhead = Math.max(state.maxAhead, bufferedEnd() - audio.currentTime);
+				if (!sourceBuffer.updating) trim();
+				if (!sourceBuffer.updating) pump();
+			}
+
+			function flushBatch() {
+				clearTimeout(batchTimer);
+				batchTimer = undefined;
+				if (batch.length === 0) return;
+				const data = new Uint8Array(batchSize);
+				let offset = 0;
+				for (const part of batch) {
+					data.set(part, offset);
+					offset += part.length;
+				}
+				batch = [];
+				batchSize = 0;
+				queue.push({ data });
+				pump();
+			}
+
+			function onAudio(part) {
+				state.audioBytes += part.length;
+				batch.push(part);
+				batchSize += part.length;
+				if (batchSize >= BATCH_BYTES) flushBatch();
+				else batchTimer ??= setTimeout(flushBatch, BATCH_MS);
+			}
+
+			function onMetadata(text) {
+				state.metaBlocks++;
+				const match = /StreamTitle='(.*?)';/s.exec(text);
+				if (!match) return;
+				const title = match[1];
+				const last = state.titles.at(-1);
+				if (last && last.title === title) return;
+				flushBatch(); // keep the marker exactly between the audio before and after it
+				const entry = { title, arrivedAt: performance.now(), mediaTime: null, shownAt: null };
+				state.titles.push(entry);
+				$('raw').textContent = title || '(пусто)';
+				log(`из потока: «${title}»`);
+				queue.push({ marker: true, entry });
+				pump();
+			}
+
+			// ---- show titles when the sound reaches them ----
+			function tick() {
+				while (timeline.length > 0 && timeline[0].mediaTime <= audio.currentTime + 0.05) {
+					const entry = timeline.shift();
+					entry.shownAt = performance.now();
+					$('shown').textContent = entry.title || '(пусто)';
+					$('lead').textContent = `${((entry.shownAt - entry.arrivedAt) / 1000).toFixed(1)} с`;
+					log(
+						`ЗВУЧИТ: «${entry.title}» (из потока пришло на ${((entry.shownAt - entry.arrivedAt) / 1000).toFixed(1)} с раньше)`,
+					);
+				}
+				// Lagging far behind the live edge (e.g. after a pause): jump forward.
+				const ahead = bufferedEnd() - audio.currentTime;
+				if (!audio.paused && ahead > MAX_AHEAD_S) {
+					audio.currentTime = bufferedEnd() - LIVE_MARGIN_S;
+					state.jumps++;
+					log(`отстали на ${ahead.toFixed(0)} с: прыжок к «живому краю»`);
+				}
+				rafId = requestAnimationFrame(tick);
+			}
+
+			function renderStats() {
+				const ranges = [];
+				for (let i = 0; i < (sourceBuffer?.buffered.length ?? 0); i++) {
+					ranges.push(
+						`${sourceBuffer.buffered.start(i).toFixed(1)}–${sourceBuffer.buffered.end(i).toFixed(1)}`,
+					);
+				}
+				const ahead = bufferedEnd() - audio.currentTime;
+				const memory = performance.memory
+					? `${(performance.memory.usedJSHeapSize / 1048576).toFixed(0)} МБ`
+					: 'нет данных';
+				$('stats').textContent = [
+					`работает: ${((performance.now() - state.startedAt) / 1000).toFixed(0)} с    воспроизведение: ${audio.paused ? 'ПАУЗА' : 'играет'}    readyState=${audio.readyState}`,
+					`currentTime: ${audio.currentTime.toFixed(1)} с    буфер: ${ranges.join(', ') || '—'}    впереди: ${ahead.toFixed(1)} с (макс. ${state.maxAhead.toFixed(1)})`,
+					`принято: ${(state.bytesIn / 1024).toFixed(0)} КБ    аудио: ${(state.audioBytes / 1024).toFixed(0)} КБ    добавлено: ${(state.bytesAppended / 1024).toFixed(0)} КБ (${state.appends} вызовов)    очередь: ${queue.length}`,
+					`блоков метаданных: ${state.metaBlocks}    смен названия: ${state.titles.length}    обрезок буфера: ${state.trims}    переполнений: ${state.quotaErrors}`,
+					`waiting: ${state.waiting}    stalled: ${state.stalled}    прыжков к живому краю: ${state.jumps}    ошибок: ${state.errors.length}    память JS: ${memory}`,
+				].join('\n');
+			}
+
+			// ---- start / stop ----
+			async function start() {
+				stop(true);
+				reset();
+				$('log').textContent = '';
+				$('shown').textContent = '—';
+				$('raw').textContent = '—';
+				$('lead').textContent = '—';
+				$('start').disabled = true;
+				$('stop').disabled = false;
+
+				const MediaSourceClass = window.ManagedMediaSource ?? window.MediaSource;
+				if (!MediaSourceClass || !MediaSourceClass.isTypeSupported('audio/mpeg')) {
+					fail('поддержка', 'MediaSource с audio/mpeg недоступен в этом браузере');
+					stop();
+					return;
+				}
+
+				controller = new AbortController();
+				mediaSource = new MediaSourceClass();
+				audio.src = URL.createObjectURL(mediaSource);
+				if (window.ManagedMediaSource) audio.disableRemotePlayback = true;
+				await new Promise((resolve) =>
+					mediaSource.addEventListener('sourceopen', resolve, { once: true }),
+				);
+				try {
+					sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
+				} catch (error) {
+					fail('addSourceBuffer', error);
+					stop();
+					return;
+				}
+				sourceBuffer.addEventListener('updateend', onUpdateEnd);
+				sourceBuffer.addEventListener('error', () => fail('SourceBuffer', 'error event'));
+				statsTimer = setInterval(renderStats, 1000);
+				rafId = requestAnimationFrame(tick);
+
+				try {
+					log('fetch с Icy-MetaData: 1');
+					const response = await fetch($('url').value.trim(), {
+						headers: { 'Icy-MetaData': '1' },
+						signal: controller.signal,
+					});
+					log(
+						`HTTP ${response.status}, ${response.headers.get('content-type')}, icy-metaint=${response.headers.get('icy-metaint')}`,
+					);
+					if (!response.ok) throw new Error(`HTTP ${response.status}`);
+					const metaint = Number.parseInt(response.headers.get('icy-metaint'), 10);
+					if (!metaint) throw new Error('нет icy-metaint (заголовок не виден браузеру)');
+
+					const demux = createDemuxer(metaint, onAudio, onMetadata);
+					const reader = response.body.getReader();
+					for (;;) {
+						const { done, value } = await reader.read();
+						if (done) {
+							state.endedBy = 'сервер закрыл поток';
+							break;
+						}
+						state.firstAudioAt ??= performance.now() - state.startedAt;
+						state.bytesIn += value.length;
+						demux(value);
+					}
+				} catch (error) {
+					if (controller.signal.aborted) return;
+					state.endedBy = `ошибка чтения: ${error.message}`;
+					fail('поток', error);
+				}
+				log(`поток закончился: ${state.endedBy}`);
+			}
+
+			function stop(silent = false) {
+				controller?.abort();
+				clearTimeout(batchTimer);
+				clearInterval(statsTimer);
+				cancelAnimationFrame(rafId);
+				queue = [];
+				batch = [];
+				batchSize = 0;
+				timeline = [];
+				audio.pause();
+				if (audio.src) URL.revokeObjectURL(audio.src);
+				audio.removeAttribute('src');
+				audio.load();
+				sourceBuffer = undefined;
+				mediaSource = undefined;
+				$('start').disabled = false;
+				$('stop').disabled = true;
+				if (!silent) log('остановлено');
+			}
+
+			audio.addEventListener('canplay', () => {
+				if (audio.paused && !audio.dataset.userPaused)
+					audio.play().catch((error) => fail('play()', error));
+			});
+			audio.addEventListener('pause', () => (audio.dataset.userPaused = '1'));
+			audio.addEventListener('play', () => delete audio.dataset.userPaused);
+			audio.addEventListener('waiting', () => {
+				state.waiting++;
+				log('waiting (буфер кончился)');
+			});
+			audio.addEventListener('stalled', () => state.stalled++);
+			audio.addEventListener('error', () =>
+				fail('<audio>', `код ${audio.error?.code} ${audio.error?.message ?? ''}`),
+			);
+			audio.addEventListener('playing', () => log('playing'));
+
+			function report() {
+				const seconds = (performance.now() - state.startedAt) / 1000;
+				const support = [];
+				for (const [name, mime] of [
+					['MediaSource', 'audio/mpeg'],
+					['ManagedMediaSource', 'audio/mpeg'],
+				]) {
+					const ctor = window[name];
+					support.push(`${name}: ${ctor ? `есть, ${mime}=${ctor.isTypeSupported(mime)}` : 'нет'}`);
+				}
+				const lines = [
+					`== Отчёт спайка ICY+MSE ==`,
+					`userAgent: ${navigator.userAgent}`,
+					support.join('; '),
+					`поток: ${$('url').value}`,
+					`длительность: ${seconds.toFixed(0)} с; первый звук через ${state.firstAudioAt ? (state.firstAudioAt / 1000).toFixed(1) : '—'} с`,
+					`принято ${(state.bytesIn / 1024).toFixed(0)} КБ, добавлено ${(state.bytesAppended / 1024).toFixed(0)} КБ, вызовов append: ${state.appends}`,
+					`waiting: ${state.waiting}, stalled: ${state.stalled}, прыжков к живому краю: ${state.jumps}, обрезок: ${state.trims}, переполнений: ${state.quotaErrors}`,
+					`макс. опережение буфера: ${state.maxAhead.toFixed(1)} с; память JS: ${performance.memory ? (performance.memory.usedJSHeapSize / 1048576).toFixed(0) + ' МБ' : 'нет данных'}`,
+					`поток закончился: ${state.endedBy ?? 'нет, ещё идёт'}`,
+					`ошибки: ${state.errors.length ? '\n  ' + state.errors.join('\n  ') : 'нет'}`,
+					`смены названия (пришло из потока → прозвучало):`,
+					...state.titles.map(
+						(t) =>
+							`  «${t.title}»  опережение ${t.shownAt ? ((t.shownAt - t.arrivedAt) / 1000).toFixed(1) + ' с' : 'ещё не прозвучало'}`,
+					),
+					``,
+					`Ваши наблюдения (допишите): щелчки при паузе/Play? совпадает ли название со слухом? сбои звука?`,
+				];
+				$('out').value = lines.join('\n');
+			}
+
+			$('start').addEventListener('click', start);
+			$('stop').addEventListener('click', () => stop());
+			$('report').addEventListener('click', report);
+			window.addEventListener('beforeunload', () => stop(true));
+		</script>
+	</body>
+</html>
