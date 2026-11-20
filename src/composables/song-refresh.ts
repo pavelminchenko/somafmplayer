@@ -11,6 +11,8 @@ const FRESH_FOR_MS = 5000;
  * but only while it matters (sound is wanted and the tab is visible), and it refreshes at once
  * when it starts mattering again (Play pressed, tab shown, reconnected), so a returning
  * listener does not look at a stale title until the next tick.
+ *
+ * While the stream itself delivers the titles (`liveTitle`), polling is not needed at all.
  */
 export function useSongRefresh(isPlaying: MaybeRefOrGetter<boolean>) {
 	const mainStore = useMainStore();
@@ -22,7 +24,9 @@ export function useSongRefresh(isPlaying: MaybeRefOrGetter<boolean>) {
 	// The tick's promise never rejects (refreshCurrentSongs swallows transient errors).
 	// eslint-disable-next-line @typescript-eslint/no-misused-promises
 	const { pause, resume } = useIntervalFn(refresh, SONGS_REFRESH_INTERVAL_MS, { immediate: false });
-	const isActive = computed(() => toValue(isPlaying) && visibility.value === 'visible');
+	const isActive = computed(
+		() => toValue(isPlaying) && visibility.value === 'visible' && !mainStore.liveTitle,
+	);
 
 	watch(
 		isActive,

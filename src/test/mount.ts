@@ -13,9 +13,15 @@ interface Mounted {
  * `js-beautify` dependency tree). Event listeners are passed as `onXxx` props.
  */
 // `component` is typed `unknown` because ESLint cannot resolve the types of `.vue` imports.
-export function mountComponent(component: unknown, props: Record<string, unknown> = {}): Mounted {
+export function mountComponent(
+	component: unknown,
+	props: Record<string, unknown> = {},
+	/** Runs after Pinia is active and before the component is mounted (e.g. to fill the store). */
+	prepare?: () => void,
+): Mounted {
 	const pinia = createPinia();
 	setActivePinia(pinia);
+	prepare?.();
 
 	const el = document.createElement('div');
 	document.body.append(el);

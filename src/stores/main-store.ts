@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { api, isChannelSummary } from '@/api.ts';
+import { splitArtistSong } from '@/lib/icy-demuxer';
 import { type Channel, type ChannelSummary, type Song } from '@/types.ts';
 
 const CHANNELS_CACHE_KEY = 'somafm-player:channels';
@@ -59,10 +60,28 @@ export const useMainStore = defineStore('main-store', {
 		streamUrls: [] as string[],
 		// When the current channel's songs were last loaded (ms since epoch; 0 = never).
 		songsUpdatedAt: 0,
+		// Track title read from the stream itself (ICY), empty when the stream has none.
+		liveTitle: '',
 		// False for a channel restored after a reload: browsers block autoplay without a user gesture,
 		// so it is prepared and waits for the Play button.
 		autoplay: true,
 	}),
+
+	getters: {
+		/**
+		 * What is playing: the title from the stream when there is one (exact, in sync with the
+		 * sound), otherwise the newest song of the API's history.
+		 */
+		nowPlaying(state): { artist: string; title: string } | null {
+			if (state.liveTitle) {
+				const { artist, song } = splitArtistSong(state.liveTitle);
+				return { artist, title: song };
+			}
+			const songs = state.currentChannel?.songs;
+			const song = songs && songs.length > 0 ? songs[0] : undefined;
+			return song ? { artist: song.artist, title: song.title } : null;
+		},
+	},
 
 	actions: {
 		/**
@@ -151,6 +170,7 @@ export const useMainStore = defineStore('main-store', {
 
 				// Commit everything at once so the title, songs and stream never diverge.
 				this.currentChannel = { ...channel, songs };
+				this.liveTitle = ''; // a new channel: the previous stream's title does not apply
 				this.songsUpdatedAt = Date.now();
 				this.streamUrls = streamUrls;
 				this.autoplay = autoplay;

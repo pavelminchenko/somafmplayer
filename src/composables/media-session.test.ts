@@ -74,6 +74,38 @@ describe('useMediaSession', () => {
 		scope.stop();
 	});
 
+	it('publishes the title read from the stream, split into artist and song', async () => {
+		const store = useMainStore();
+		store.currentChannel = channel;
+		store.liveTitle = 'Live Artist - Live Song';
+		const scope = effectScope();
+		scope.run(() => {
+			useMediaSession(ref(true), { play: noop, pause: noop, previous: noop, next: noop });
+		});
+		await nextTick();
+
+		expect(session.metadata).toMatchObject({ title: 'Live Song', artist: 'Live Artist' });
+
+		store.liveTitle = 'Next Artist - Next Song';
+		await nextTick();
+		expect(session.metadata).toMatchObject({ title: 'Next Song', artist: 'Next Artist' });
+		scope.stop();
+	});
+
+	it('uses SomaFM as the artist when the stream title has none', async () => {
+		const store = useMainStore();
+		store.currentChannel = channel;
+		store.liveTitle = 'Station jingle';
+		const scope = effectScope();
+		scope.run(() => {
+			useMediaSession(ref(true), { play: noop, pause: noop, previous: noop, next: noop });
+		});
+		await nextTick();
+
+		expect(session.metadata).toMatchObject({ title: 'Station jingle', artist: 'SomaFM' });
+		scope.stop();
+	});
+
 	it('falls back to the channel title when no song is known', async () => {
 		const store = useMainStore();
 		store.currentChannel = { ...channel, songs: [] };

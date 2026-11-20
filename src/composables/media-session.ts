@@ -8,6 +8,11 @@ interface MediaSessionHandlers {
 	next: () => void | Promise<void>;
 }
 
+/** An empty title/artist (e.g. a stream without a proper title) falls back to something readable. */
+function orFallback(value: string | undefined, fallback: string) {
+	return value === undefined || value === '' ? fallback : value;
+}
+
 /**
  * Publishes the current channel/song and playback state to the OS (media keys, lock screen,
  * Bluetooth headsets, browser media hub) and routes their buttons to the player.
@@ -27,11 +32,11 @@ export function useMediaSession(
 			session.metadata = null;
 			return;
 		}
-		const song = channel.songs.length > 0 ? channel.songs[0] : undefined;
+		const song = mainStore.nowPlaying;
 		const artwork = channel.xlimage || channel.largeimage || channel.image;
 		session.metadata = new MediaMetadata({
-			title: song?.title ?? channel.title,
-			artist: song?.artist ?? 'SomaFM',
+			title: orFallback(song?.title, channel.title),
+			artist: orFallback(song?.artist, 'SomaFM'),
 			album: channel.title,
 			artwork: artwork ? [{ src: artwork }] : [],
 		});

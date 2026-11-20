@@ -91,6 +91,35 @@ describe('useSongRefresh', () => {
 		expect(refresh).toHaveBeenCalledTimes(1);
 	});
 
+	it('does not poll while the stream delivers the titles itself', async () => {
+		const store = useMainStore();
+		store.liveTitle = 'Artist - Song';
+		const { isPlaying, refresh } = setup(false);
+
+		isPlaying.value = true;
+		await nextTick();
+		await vi.advanceTimersByTimeAsync(120_000);
+
+		expect(refresh).not.toHaveBeenCalled();
+	});
+
+	it('starts polling (at once) when the stream titles are lost, e.g. after a fallback', async () => {
+		const store = useMainStore();
+		store.liveTitle = 'Artist - Song';
+		const { isPlaying, refresh } = setup(true);
+		await nextTick();
+		await vi.advanceTimersByTimeAsync(60000);
+		expect(refresh).not.toHaveBeenCalled();
+
+		store.liveTitle = '';
+		await nextTick();
+		expect(refresh).toHaveBeenCalledTimes(1);
+
+		await vi.advanceTimersByTimeAsync(15000);
+		expect(refresh).toHaveBeenCalledTimes(2);
+		expect(isPlaying.value).toBe(true);
+	});
+
 	it('stops with its scope', async () => {
 		const { refresh, scope } = setup(true);
 		await nextTick();

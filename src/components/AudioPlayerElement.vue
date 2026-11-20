@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import AudioPlayerElementControls from '@/components/AudioPlayerElementControls.vue';
 import AudioPlayerElementVisualizer from '@/components/AudioPlayerElementVisualizer.vue';
 import { useMediaSession } from '@/composables/media-session';
@@ -21,11 +21,21 @@ const {
 	resume,
 	pause,
 	toggle,
+	liveTitle,
 	listeners,
 } = usePlayer(audio, {
 	sources: computed(() => mainStore.streamUrls),
 	autoplay: computed(() => mainStore.autoplay),
 });
+
+// The title read from the stream is the source of truth while it exists (no API polling then).
+watch(
+	liveTitle,
+	(title) => {
+		mainStore.liveTitle = title;
+	},
+	{ immediate: true },
+);
 
 useSongRefresh(isPlaying);
 useMediaSession(isPlaying, {

@@ -5,8 +5,9 @@ import { useMainStore } from '@/stores/main-store';
 const mainStore = useMainStore();
 
 const currentSongInfo = computed(() => {
-	const song = mainStore.currentChannel?.songs[0];
-	return song ? `${song.artist} - ${song.title}` : '';
+	const song = mainStore.nowPlaying;
+	if (!song) return '';
+	return song.artist ? `${song.artist} - ${song.title}` : song.title;
 });
 </script>
 

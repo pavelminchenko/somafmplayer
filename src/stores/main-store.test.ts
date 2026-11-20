@@ -513,3 +513,56 @@ describe('last selected channel', () => {
 		expect(store.requestedChannelId).toBe('');
 	});
 });
+
+async function playing(songs = [song('Api Song')]) {
+	mocked.getStreamUrls.mockResolvedValue(['https://ice4.somafm.com/a']);
+	mocked.getChannelSongs.mockResolvedValue(songs);
+	const store = useMainStore();
+	await store.setCurrentChannel(makeChannel('a'));
+	return store;
+}
+
+describe('nowPlaying and liveTitle', () => {
+	it('is empty before anything is playing', () => {
+		expect(useMainStore().nowPlaying).toBeNull();
+	});
+
+	it('uses the newest song of the API history when the stream has no title', async () => {
+		const store = await playing([song('Newest'), song('Older')]);
+		expect(store.nowPlaying).toEqual({ artist: 'Artist', title: 'Newest' });
+	});
+
+	it('is null for a channel without any song history', async () => {
+		const store = await playing([]);
+		expect(store.nowPlaying).toBeNull();
+	});
+
+	it('prefers the title read from the stream and splits "Artist - Song"', async () => {
+		const store = await playing();
+
+		store.liveTitle = 'Jim and Jillian Graham - Seaside';
+
+		expect(store.nowPlaying).toEqual({ artist: 'Jim and Jillian Graham', title: 'Seaside' });
+	});
+
+	it('shows a stream title without an artist as the title alone', async () => {
+		const store = await playing();
+		store.liveTitle = 'Station jingle';
+		expect(store.nowPlaying).toEqual({ artist: '', title: 'Station jingle' });
+	});
+
+	it('falls back to the API song when the stream title is empty', async () => {
+		const store = await playing([song('Api Song')]);
+		store.liveTitle = '';
+		expect(store.nowPlaying?.title).toBe('Api Song');
+	});
+
+	it('forgets the stream title when another channel is selected', async () => {
+		const store = await playing();
+		store.liveTitle = 'Old - Title';
+
+		await store.setCurrentChannel(makeChannel('b'));
+
+		expect(store.liveTitle).toBe('');
+	});
+});
