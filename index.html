@@ -3,6 +3,8 @@
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<!-- SomaFM rejects stream requests whose Referer is localhost; <audio> has no referrerpolicy attribute, so the policy is set for the whole page. -->
+		<meta name="referrer" content="no-referrer" />
 		<link rel="icon" href="/favicon.ico" />
 		<link rel="preconnect" href="https://api.somafm.com" />
 		<title>SomaFM Radio</title>

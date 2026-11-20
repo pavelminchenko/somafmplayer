@@ -224,6 +224,14 @@ npm test                             # Vitest
 `Icy-MetaData`, чтение метаданных из браузера у SomaFM **невозможно** (серверы отклоняют
 такие запросы), и вариант ICY закрывается.
 
+**Выяснено позже:** 403 на потоки на `localhost` вызывает заголовок `Referer: http://localhost:3000/`
+(на Vercel и при открытии адреса прямо во вкладке, где `Referer` нет, звук играет; проверки
+`crossOrigin`/`referrerPolicy` из консоли были некорректны: у `<audio>` нет атрибута
+`referrerpolicy`). Лечение: `<meta name="referrer" content="no-referrer">` в `index.html` и
+`Referrer-Policy: no-referrer` в `vercel.json`. Поэтому предыдущий вывод про `Icy-MetaData` и
+403 был ложным: 403 получал любой запрос с localhost; ICY нужно перепроверить после
+этой правки (`tools/icy-probe.html`: `fetch` тоже отправляет `Referer`, теперь без него).
+
 **Как проверить ICY у себя:** `npm run dev`, открыть
 `http://localhost:3000/tools/icy-probe.html`, нажать «Проверить». Страница читает поток
 с `Icy-MetaData: 1`, показывает заголовки ответа, блоки метаданных, найденные названия
