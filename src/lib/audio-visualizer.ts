@@ -1,6 +1,8 @@
+import type { AudioOutput } from '@/lib/audio-output';
+
 /**
  * Circular audio spectrum visualizer: two analysers (blue and red) drawn around a ring
- * on a canvas, fed by a Web Audio graph built on top of an <audio> element.
+ * on a canvas, fed by the Web Audio output of the player (see audio-output.ts).
  */
 
 const FREQUENCY_BINS = 1024; // AnalyserNode.fftSize (2048) / 2
@@ -11,17 +13,6 @@ const STROKE_PADDING = 3;
 const FRAME_INTERVAL_MS = 15;
 // Frames to keep drawing after a pause so the ring can settle, then the loop stops until `play`.
 const IDLE_FRAMES_BEFORE_STOP = 180;
-
-// Safari < 14.1 only ships the prefixed constructor.
-interface LegacyAudioWindow {
-	AudioContext?: typeof AudioContext;
-	webkitAudioContext?: typeof AudioContext;
-}
-
-// Context state changes can race with teardown; failures here are harmless.
-function ignoreError() {
-	/* noop */
-}
 
 interface VisualState {
 	canvasContext: CanvasRenderingContext2D;
@@ -233,7 +224,6 @@ class Sound implements AnalyserHost {
 	readonly audioContext: AudioContext;
 
 	private readonly analysers: Analyser[] = [];
-	private source?: MediaElementAudioSourceNode;
 	private frameId = 0;
 	private isRunning = false;
 	private isDestroyed = false;
@@ -243,11 +233,9 @@ class Sound implements AnalyserHost {
 	constructor(
 		readonly visual: SoundVisual,
 		private readonly audio: HTMLAudioElement,
+		private readonly output: AudioOutput,
 	) {
-		const legacyWindow = window as unknown as LegacyAudioWindow;
-		const AudioContextClass = legacyWindow.AudioContext ?? legacyWindow.webkitAudioContext;
-		if (!AudioContextClass) throw new Error('Web Audio API is not supported');
-		this.audioContext = new AudioContextClass();
+		this.audioContext = output.context;
 	}
 
 	init() {
@@ -274,11 +262,10 @@ class Sound implements AnalyserHost {
 			}),
 		);
 
-		this.source = this.audioContext.createMediaElementSource(this.audio);
-		for (const { analyser } of this.analysers) this.source.connect(analyser);
-		this.source.connect(this.audioContext.destination);
+		// Analysers only listen to what is played (after the gain, so the picture follows the volume).
+		for (const { analyser } of this.analysers) this.output.node.connect(analyser);
 
-		this.resume();
+		this.output.resume();
 		this.isReady = true;
 		this.audio.addEventListener('play', this.wake);
 		this.start();
@@ -288,27 +275,24 @@ class Sound implements AnalyserHost {
 		for (const analyser of this.analysers) analyser.update();
 	}
 
-	// A context created outside a user gesture starts "suspended" and plays silence
-	// once the <audio> element is routed through it, so it must be resumed explicitly.
 	resume() {
-		if (this.audioContext.state === 'suspended') {
-			this.audioContext.resume().catch(ignoreError);
-		}
+		this.output.resume();
 	}
 
 	destroy() {
 		this.isDestroyed = true;
 		this.audio.removeEventListener('play', this.wake);
 		cancelAnimationFrame(this.frameId);
-		this.source?.disconnect();
-		for (const { analyser } of this.analysers) analyser.disconnect();
-		if (this.audioContext.state !== 'closed') this.audioContext.close().catch(ignoreError);
+		for (const { analyser } of this.analysers) {
+			this.output.node.disconnect(analyser);
+			analyser.disconnect();
+		}
 	}
 
 	/** Restarts the draw loop after it went idle on pause. */
 	private readonly wake = () => {
 		this.idleFrames = 0;
-		this.resume();
+		this.output.resume();
 		this.start();
 	};
 
@@ -347,12 +331,13 @@ class Visualizer {
 	constructor(
 		audio: HTMLAudioElement,
 		private readonly canvas: HTMLCanvasElement,
+		output: AudioOutput,
 	) {
 		const context = canvas.getContext('2d');
 		if (!context) throw new Error('2D canvas context is not available');
 		this.canvasContext = context;
 
-		this.sound = new Sound(this, audio);
+		this.sound = new Sound(this, audio, output);
 		this.sound.init();
 	}
 

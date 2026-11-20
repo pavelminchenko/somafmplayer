@@ -2,10 +2,12 @@
 import { useDevicePixelRatio, useElementSize } from '@vueuse/core';
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue';
 import { useScreenSize } from '@/composables/screen-size';
+import type { AudioOutput } from '@/lib/audio-output';
 import { Visualizer } from '@/lib/audio-visualizer';
 
 const props = defineProps<{
 	audio: HTMLAudioElement;
+	output: AudioOutput;
 }>();
 
 const MIN_BITMAP_SIZE = 256;
@@ -27,20 +29,15 @@ const bitmapSize = computed(() => {
 	return Math.min(size.value, Math.max(MIN_BITMAP_SIZE, pixels));
 });
 
-const resumeContext = () => visualizer.value?.resume();
-
 watch([size, bitmapSize], ([logical, bitmap]) => visualizer.value?.setSize(logical, bitmap));
 
 onMounted(() => {
 	if (!visualizerElement.value) return;
-	visualizer.value = new Visualizer(props.audio, visualizerElement.value);
+	visualizer.value = new Visualizer(props.audio, visualizerElement.value, props.output);
 	visualizer.value.setSize(size.value, bitmapSize.value);
-	// Browsers may keep the AudioContext suspended until the user starts playback.
-	props.audio.addEventListener('play', resumeContext);
 });
 
 onBeforeUnmount(() => {
-	props.audio.removeEventListener('play', resumeContext);
 	visualizer.value?.destroy();
 	visualizer.value = undefined;
 });
